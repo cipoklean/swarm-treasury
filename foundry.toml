@@ -1,0 +1,33 @@
+[profile.default]
+src = "contracts"
+out = "out"
+libs = ["lib"]
+
+# Compiler settings
+solc = "0.8.20"
+optimizer = true
+optimizer_runs = 200
+
+# Remappings
+remappings = [
+    "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable-v4/contracts/",
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts-v4/contracts/",
+    "forge-std/=lib/forge-std/src/"
+]
+
+# Testing
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = true
+int_types = "long"
+multiline_func_header = "attributes_first"
+single_line_statement_blocks = "multi"
+
+[doc]
+include = ["contracts"]
+exclude = ["test", "script"]
+
+# Gas reports
+[profile.gas_reports]
+disabled = false

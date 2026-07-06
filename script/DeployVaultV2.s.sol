@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {Script, console} from "forge-std/Script.sol";
+import {TreasuryVault} from "../contracts/TreasuryVault.sol";
+import {MockYieldStrategy} from "../contracts/YieldStrategy.sol";
+
+contract DeployVaultV2 is Script {
+    function run() external {
+        uint256 deployerPK = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 governorPK = vm.envUint("GOVERNOR_PRIVATE_KEY");
+        uint256 yieldPK = vm.envUint("YIELD_SCOUT_PRIVATE_KEY");
+        uint256 riskPK = vm.envUint("RISK_GUARD_PRIVATE_KEY");
+        uint256 execPK = vm.envUint("EXECUTOR_PRIVATE_KEY");
+
+        vm.startBroadcast(deployerPK);
+
+        TreasuryVault vault = new TreasuryVault();
+        vault.initialize(vm.addr(governorPK), vm.addr(governorPK),
+            0x9b29Fe91ABE65846F0EeFf3989b9C8a496E2260B,
+            0xA9e5FF4F6284c22dD98bac50bEd86A2E3ED5d43D);
+
+        vault.grantRole(keccak256("YIELD_SCOUT_ROLE"), vm.addr(yieldPK));
+        vault.grantRole(keccak256("RISK_GUARD_ROLE"), vm.addr(riskPK));
+        vault.grantRole(keccak256("EXECUTOR_ROLE"), vm.addr(execPK));
+
+        address token = 0xC4A78F258fe5E97DD97C548BEAe237f202C4A37c;
+        vault.addAssetToWhitelist(token, 1_000_000 ether, 1000);
+
+        // Deploy fresh strategies
+        MockYieldStrategy s1 = new MockYieldStrategy();
+        MockYieldStrategy s2 = new MockYieldStrategy();
+        vault.addStrategy(address(s1), token, 100_000 ether, 500, 30);
+        vault.addStrategy(address(s2), token, 100_000 ether, 500, 30);
+
+        vm.stopBroadcast();
+        console.log("Vault:", address(vault));
+        console.log("Strategy1:", address(s1));
+        console.log("Strategy2:", address(s2));
+    }
+}

@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+lib/
+
+# Build outputs
+out/
+cache/
+broadcast/
+dist/
+dashboard/dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+agents/abis.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+
+# Foundry artifacts
+*.sol.json
