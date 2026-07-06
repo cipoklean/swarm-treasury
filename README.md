@@ -135,7 +135,7 @@ swarm-treasury/
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/swarm-treasury.git
+   git clone https://github.com/cipoklean/swarm-treasury.git
    cd swarm-treasury
    ```
 
