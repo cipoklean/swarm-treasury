@@ -28,6 +28,10 @@ interface ITreasury {
     function votingPeriod() external view returns (uint256);
     function quorum() external view returns (uint256);
 
+    // Pause control (gated by GOVERNOR_ROLE on the vault)
+    function pause() external;
+    function unpause() external;
+
     // Treasury operations
     function assetWhitelist(address asset) external view returns (bool);
     function whitelistedAssets(uint256 index) external view returns (address);

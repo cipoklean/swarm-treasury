@@ -86,10 +86,13 @@ swarm-treasury/
 │   └── requirements.txt         # web3, plyer, python-dotenv
 ├── script/                      # Foundry deploy scripts
 │   ├── Deploy.s.sol            # Full system deploy + wiring
+│   ├── DeployVaultV2.s.sol     # Vault-only deploy (variant)
 │   ├── DeployVaultV3.s.sol     # Vault-only deploy with fresh strategy
+│   ├── RedeployVault.s.sol     # Re-deploy vault + strategy
 │   ├── MintTokens.s.sol        # Deploy MintableERC20 + mint supply
+│   ├── SetupAgentRoles.s.sol   # Grant agent roles on the vault
 │   └── FundVault.s.sol         # Whitelist token, add strategy, deposit
-├── test/                        # Foundry tests (83 tests, 100% pass)
+├── test/                        # Foundry tests (88 tests, 100% pass)
 │   ├── TreasuryVault.t.sol
 │   ├── AgentRegistry.t.sol
 │   ├── MessageBus.t.sol
@@ -157,7 +160,7 @@ swarm-treasury/
 4. **Compile & test:**
    ```bash
    forge build
-   forge test  # 83 tests, 0 failures
+   forge test  # 88 tests, 0 failures
    ```
 
 ### Running the Demo
@@ -199,13 +202,13 @@ That script:
    ├─ Monitors for large moves (>20% treasury)
    ├─ Shows CLI prompt: "Approve [Y/n]" with 30s timeout
    ├─ Auto-vetoes if no response within timeout
-   └─ Can trigger emergency pause across all contracts
+   └─ Can trigger emergency pause of the treasury vault
 ```
 
 ## 🔧 Smart Contracts
 
 ### TreasuryVault.sol
-- **Purpose:** Holds USDT funds, executes multi-sig transactions
+- **Purpose:** Holds sUSD funds, executes multi-sig transactions
 - **Security:** Reentrancy guard, pausable, ownable, input validation
 - **Features:**
   - Requires Yield Scout proposal + Risk Guard approval before execution
@@ -239,7 +242,7 @@ That script:
 ### Governor.sol
 - **Purpose:** Emergency pause and parameter updates
 - **Features:**
-  - Emergency pause across all contracts
+  - Emergency pause of the treasury vault and itself
   - Parameter updates with 24-block timelock
   - Large move threshold: >20% of treasury requires Governor signature
   - Detailed audit log events
@@ -290,7 +293,7 @@ That script:
 Run `bash demo/start.sh` — it:
 
 1. Checks RPC connectivity
-2. Shows live on-chain state (proposals, messages, agent BOT balances)
+2. Shows live on-chain state (proposals, messages, agent sUSD balances)
 3. Launches Yield Scout, Risk Guard, Executor, and Governor simultaneously
 4. Agents begin scanning strategies, creating proposals, voting, and executing within seconds
 5. Press Ctrl+C to stop all agents cleanly
@@ -301,7 +304,7 @@ Open the dashboard in a second terminal:
 cd dashboard && npm run dev
 ```
 
-Then visit `http://localhost:5173` to see:
+Then visit `http://localhost:3000` to see:
 - Agent status cards with live pulses
 - Message bus feed updating in real-time
 - Treasury balance chart with APY projection
@@ -331,7 +334,7 @@ Then visit `http://localhost:5173` to see:
    // In your deployment script
    await treasuryVault.addStrategy(
        myStrategyAddress,
-       usdtAddress,
+       susdAddress,
        maxAllocation,
        minReturnBps,
        maxSlippageBps

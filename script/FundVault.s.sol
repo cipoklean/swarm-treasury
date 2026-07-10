@@ -7,7 +7,7 @@ import {MintableERC20} from "../contracts/MintableERC20.sol";
 import {MockYieldStrategy} from "../contracts/YieldStrategy.sol";
 
 contract FundVault is Script {
-    address constant VAULT    = 0xb03395BcC85C921c4CEEF26C771Edb36FF6738C4;
+    address constant VAULT    = 0xDE3b01A9f936170e09089CB15A187CaE3442559c;
     address constant TOKEN    = 0xC4A78F258fe5E97DD97C548BEAe237f202C4A37c;
     address constant STRATEGY = 0xAc233f7169E57eA15182F5bC66C2C427a7af6103;
 

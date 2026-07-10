@@ -13,6 +13,7 @@ import {ITreasury} from "./ITreasury.sol";
 import {IAgentRegistry} from "./IAgentRegistry.sol";
 import {IMessageBus} from "./IMessageBus.sol";
 import {IYieldStrategy} from "./IYieldStrategy.sol";
+import {IGovernor} from "./IGovernor.sol";
 
 contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable, AccessControlUpgradeable, ITreasury {
     using SafeERC20 for IERC20;
@@ -86,6 +87,8 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
     IAgentRegistry public agentRegistry;
     IMessageBus public messageBus;
 
+    address public governorContract;
+
     uint256 public constant MIN_TIMELOCK_BLOCKS = 2;
     uint256 public constant MAX_SLIPPAGE_BPS = 50;
     uint256 public constant LARGE_MOVE_THRESHOLD_BPS = 2000;
@@ -128,6 +131,10 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         emit MessageBusSet(_messageBus);
     }
 
+    function setGovernorContract(address _gov) external onlyRole(GOVERNOR_ROLE) {
+        governorContract = _gov;
+    }
+
     function deposit(address asset, uint256 amount) external nonReentrant whenNotPaused {
         require(amount > 0, "Amount must be > 0");
         require(assetWhitelist[asset], "Asset not whitelisted");
@@ -138,17 +145,31 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         emit TreasuryDeposit(asset, amount, msg.sender);
     }
 
-    function executeProposal(uint256 proposalId) external nonReentrant whenNotPaused {
+    function executeProposal(uint256 proposalId) external nonReentrant whenNotPaused onlyRole(EXECUTOR_ROLE) {
         Proposal storage proposal = _proposals[proposalId];
         require(!proposal.executed, "Already executed");
         require(!proposal.cancelled, "Cancelled");
         require(proposal.yieldScoutApproved, "Yield Scout not approved");
         require(proposal.riskGuardApproved, "Risk Guard not approved");
 
-        (bool success, ) = proposal.target.call{value: proposal.value}(proposal.data);
-        require(success, "Execution failed");
-
         proposal.executed = true;
+
+        if (proposal.target == address(this)) {
+            // Self-targeted actions (depositToStrategy / withdrawFromStrategy) are invoked
+            // internally so msg.sender remains the EXECUTOR, preserving role-gated authority
+            // while still routing through this access-controlled entry point.
+            bytes4 selector = bytes4(proposal.data);
+            require(
+                selector == this.depositToStrategy.selector || selector == this.withdrawFromStrategy.selector,
+                "Unsupported vault action"
+            );
+            (bool success, ) = address(this).call(proposal.data);
+            require(success, "Execution failed");
+        } else {
+            (bool success, ) = proposal.target.call{value: proposal.value}(proposal.data);
+            require(success, "Execution failed");
+        }
+
         emit ProposalExecuted(proposalId);
     }
 
@@ -290,7 +311,7 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         uint256 amount,
         address to,
         uint256 timelockBlocks
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotPaused onlyRole(GOVERNOR_ROLE) {
         require(amount > 0, "Amount must be > 0");
         require(assetWhitelist[asset], "Asset not whitelisted");
         require(treasuryBalance[asset] >= amount, "Insufficient balance");
@@ -306,13 +327,19 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
             limit.usedAmount += amount;
         }
 
-        if (amount * 10000 >= treasuryBalance[asset] * LARGE_MOVE_THRESHOLD_BPS) {
+        uint256 largeMoveBps = LARGE_MOVE_THRESHOLD_BPS;
+        if (governorContract != address(0)) {
+            try IGovernor(governorContract).getLargeMoveThreshold() returns (uint256 t) {
+                if (t > 0) largeMoveBps = t;
+            } catch {}
+        }
+        if (amount * 10000 >= treasuryBalance[asset] * largeMoveBps) {
             require(hasRole(GOVERNOR_ROLE, msg.sender) || msg.sender == guardian, "Governor approval required");
         }
 
         treasuryBalance[asset] -= amount;
 
-        (bool success, ) = to.call{value: 0}(abi.encodeWithSelector(IERC20(asset).transfer.selector, to, amount));
+        (bool success, ) = asset.call{value: 0}(abi.encodeWithSelector(IERC20(asset).transfer.selector, to, amount));
         require(success, "Transfer failed");
 
         emit TreasuryWithdrawal(asset, amount, to);
@@ -400,7 +427,8 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         emit StrategyUpdated(strategy, maxAllocation, active);
     }
 
-    function depositToStrategy(address strategy, uint256 amount) external nonReentrant whenNotPaused onlyRole(EXECUTOR_ROLE) {
+    function depositToStrategy(address strategy, uint256 amount) external whenNotPaused {
+        require(msg.sender == address(this), "Only callable via executeProposal");
         StrategyConfig storage config = strategyConfig[strategy];
         require(config.asset != address(0), "Strategy not found");
         require(config.active, "Strategy not active");
@@ -417,7 +445,8 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         emit StrategyDeposited(strategy, amount);
     }
 
-    function withdrawFromStrategy(address strategy, uint256 amount) external nonReentrant whenNotPaused onlyRole(EXECUTOR_ROLE) {
+    function withdrawFromStrategy(address strategy, uint256 amount) external whenNotPaused {
+        require(msg.sender == address(this), "Only callable via executeProposal");
         StrategyConfig storage config = strategyConfig[strategy];
         require(config.asset != address(0), "Strategy not found");
         require(config.currentAllocation >= amount, "Insufficient allocation");

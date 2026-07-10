@@ -123,8 +123,8 @@ class Governor:
                         # Extract details from proposal
                         try:
                             decoded = self.treasury_vault.decode_function_input(proposal[3])  # data
-                            strategy_address = decoded[0]['args'][0]
-                            amount = decoded[0]['args'][1]
+                            strategy_address = decoded[0]
+                            amount = decoded[1]
                         except:
                             strategy_address = proposal[2]  # target
                             amount = proposal[1]  # value
@@ -166,16 +166,16 @@ class Governor:
         """
         try:
             # Get treasury balance for the asset
-            target = proposal[2]  # target address
-            value = proposal[1]  # value
+            target = proposal[1]  # target address
+            value = proposal[2]  # value
             
             # For strategy deposits, check against treasury balance
             if 'depositToStrategy' in str(proposal[3]):
                 # Decode to get asset and amount
                 try:
                     decoded = self.treasury_vault.decode_function_input(proposal[3])
-                    asset = decoded[0]['args'][0]  # This might be strategy, need to get asset from config
-                    amount = decoded[0]['args'][1]
+                    asset = decoded[0]  # strategyAddress (first decoded arg)
+                    amount = decoded[1]  # amount (second decoded arg)
                     
                     # Get asset from strategy config
                     strategy_config = self.treasury_vault.functions.strategyConfig(target).call()
@@ -253,7 +253,7 @@ class Governor:
                     else:
                         print("Please enter 'Y' for yes or 'N' for no")
                         
-                except KeyboardInterrupt:
+                except (KeyboardInterrupt, EOFError):
                     # Timeout
                     break
             
@@ -435,7 +435,7 @@ class Governor:
                 
                 await asyncio.sleep(0.75)
                 
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, EOFError):
                 logger.info("Governor agent stopping")
                 break
             except Exception as e:

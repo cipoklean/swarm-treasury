@@ -63,24 +63,37 @@ contract YieldStrategyTest is Test {
         strategy.deposit(amount);
         vm.stopPrank();
 
-        uint256 preBalance = token.balanceOf(user);
+        // Only the owner (the vault; here the test contract) may withdraw
+        uint256 preOwnerBalance = token.balanceOf(address(this));
 
-        vm.prank(user);
         bool success = strategy.withdraw(amount);
 
         assertTrue(success);
         assertEq(strategy.getBalance(), 0);
-        assertEq(token.balanceOf(user), preBalance + amount);
+        assertEq(token.balanceOf(address(this)), preOwnerBalance + amount);
+    }
+
+    function test_Withdraw_RevertNotOwner() public {
+        uint256 amount = 1000 ether;
+
+        vm.startPrank(user);
+        token.approve(address(strategy), amount);
+        strategy.deposit(amount);
+        vm.stopPrank();
+
+        vm.prank(user);
+        vm.expectRevert(); // onlyOwner
+        strategy.withdraw(amount);
     }
 
     function test_Withdraw_RevertZero() public {
-        vm.prank(user);
+        // owner (this contract) may call; zero-amount guard still applies
         vm.expectRevert("Amount must be > 0");
         strategy.withdraw(0);
     }
 
     function test_Withdraw_RevertInsufficient() public {
-        vm.prank(user);
+        // Called by owner (this contract) but no balance deposited
         vm.expectRevert("Insufficient mock balance");
         strategy.withdraw(100 ether);
     }
@@ -110,10 +123,11 @@ contract YieldStrategyTest is Test {
     // ==================== getExpectedReturn ====================
 
     function test_GetExpectedReturn() public {
-        // amount * apyBps * duration / (FIXED_POINT_SCALE * 100)
-        // = 1000 * 1200 * 1000 / (10000 * 100) = 1,200,000,000 / 1,000,000 = 1200
-        uint256 expected = strategy.getExpectedReturn(1000, 1000);
-        assertEq(expected, 1200);
+        // Replicate the contract's exact (rounded) math to avoid off-by-epsilon mismatches
+        uint256 durationBlocks = uint256(365 days) / 13; // ~secondsPerYear / 13s-per-block
+        uint256 durationSeconds = durationBlocks * 13;
+        uint256 expected = (1 ether * 1200 * durationSeconds) / (10000 * 31536000);
+        assertEq(strategy.getExpectedReturn(1 ether, durationBlocks), expected);
     }
 
     // ==================== checkSlippage ====================

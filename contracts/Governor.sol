@@ -59,11 +59,17 @@ contract Governor is Initializable, OwnableUpgradeable, PausableUpgradeable, Acc
     function emergencyPause() external override onlyRole(GOVERNOR_ROLE) {
         _pause();
         emit EmergencyPause(msg.sender);
+        if (address(treasuryVault).code.length > 0) {
+            treasuryVault.pause();
+        }
     }
 
     function emergencyUnpause() external override onlyRole(GOVERNOR_ROLE) {
         _unpause();
         emit EmergencyUnpause(msg.sender);
+        if (address(treasuryVault).code.length > 0) {
+            treasuryVault.unpause();
+        }
     }
 
     function setSlippageTolerance(uint256 newTolerance) external override onlyRole(GOVERNOR_ROLE) {

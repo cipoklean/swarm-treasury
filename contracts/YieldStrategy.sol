@@ -39,10 +39,10 @@ abstract contract YieldStrategy is Initializable, OwnableUpgradeable, IYieldStra
     }
 
     function getExpectedReturn(uint256 amount, uint256 duration) external view override returns (uint256) {
-        // Simple interest calculation: amount * apy * duration / FIXED_POINT_SCALE
-        // For demo purposes, duration is in blocks, we assume ~13 seconds per block
-        // This is a simplified calculation
-        return (amount * apyBps * duration) / (FIXED_POINT_SCALE * 100);
+        // Simple interest: principal * apy * durationSeconds / (FIXED_POINT_SCALE * secondsPerYear)
+        // duration is in blocks; assume ~13 seconds per block
+        uint256 durationSeconds = duration * 13;
+        return (amount * apyBps * durationSeconds) / (FIXED_POINT_SCALE * 365 days);
     }
 
     function checkSlippage(uint256 amountIn, uint256 minAmountOut) external pure override returns (bool) {
@@ -105,7 +105,7 @@ contract MockYieldStrategy is YieldStrategy {
         return true;
     }
 
-    function withdraw(uint256 amount) external override returns (bool) {
+    function withdraw(uint256 amount) external override onlyOwner returns (bool) {
         require(amount > 0, "Amount must be > 0");
         require(mockYieldBalance >= amount, "Insufficient mock balance");
         
@@ -116,7 +116,7 @@ contract MockYieldStrategy is YieldStrategy {
         return true;
     }
 
-    function harvest() external override returns (uint256) {
+    function harvest() external override onlyOwner returns (uint256) {
         // Simulate 12% APY yield
         uint256 yieldAmount = (mockYieldBalance * 1200) / 10000; // 12%
         if (yieldAmount > 0) {

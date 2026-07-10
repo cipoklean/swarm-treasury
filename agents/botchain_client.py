@@ -45,13 +45,13 @@ class BotChainClient:
     Async BOT Chain client with event polling and transaction support
     """
     
-    def __init__(self, rpc_url: str, chain_id: int = 4460):
+    def __init__(self, rpc_url: str, chain_id: int = 968):
         """
         Initialize BOT Chain client
         
         Args:
             rpc_url: BOT Chain RPC URL
-            chain_id: Chain ID (4460 for BOT Chain mainnet, 4461 for testnet)
+            chain_id: Chain ID (968 for BOT Chain — matches config.json / chainConfig.ts)
         """
         self.rpc_url = rpc_url
         self.chain_id = chain_id
@@ -345,7 +345,7 @@ def get_botchain_client() -> BotChainClient:
     
     if _botchain_client is None:
         rpc_url = os.getenv('BOT_CHAIN_RPC_URL', 'https://bot-chain-rpc.url')
-        chain_id = int(os.getenv('BOT_CHAIN_ID', '4460'))
+        chain_id = int(os.getenv('BOT_CHAIN_ID', '968'))
         _botchain_client = BotChainClient(rpc_url, chain_id)
     
     return _botchain_client

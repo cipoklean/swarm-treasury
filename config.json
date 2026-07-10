@@ -357,6 +357,30 @@
       },
       {
         "type": "function",
+        "name": "getProposalApprovals",
+        "inputs": [
+          {
+            "name": "id",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "yieldScoutApproved",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "riskGuardApproved",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
         "name": "getRoleAdmin",
         "inputs": [
           {
@@ -370,6 +394,19 @@
             "name": "",
             "type": "bytes32",
             "internalType": "bytes32"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "governorContract",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "address",
+            "internalType": "address"
           }
         ],
         "stateMutability": "view"
@@ -715,6 +752,19 @@
         "inputs": [
           {
             "name": "_registry",
+            "type": "address",
+            "internalType": "address"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "setGovernorContract",
+        "inputs": [
+          {
+            "name": "_gov",
             "type": "address",
             "internalType": "address"
           }
@@ -2437,6 +2487,19 @@
       },
       {
         "type": "function",
+        "name": "agentRegistry",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "address",
+            "internalType": "address"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
         "name": "checkExpiry",
         "inputs": [
           {
@@ -2846,6 +2909,19 @@
         "type": "function",
         "name": "renounceOwnership",
         "inputs": [],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "setAgentRegistry",
+        "inputs": [
+          {
+            "name": "_agentRegistry",
+            "type": "address",
+            "internalType": "address"
+          }
+        ],
         "outputs": [],
         "stateMutability": "nonpayable"
       },

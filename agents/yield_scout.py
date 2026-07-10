@@ -207,7 +207,7 @@ class YieldScout:
                 self.treasury_vault,
                 'createProposal',
                 [
-                    opportunity.strategy_address,
+                    self.treasury_vault.address,
                     0,  # value (native token)
                     self.treasury_vault.encode_abi(
                         'depositToStrategy',

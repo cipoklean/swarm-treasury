@@ -140,8 +140,8 @@ class RiskGuard:
             # The data should be encoded call to depositToStrategy
             try:
                 decoded = self.treasury_vault.decode_function_input(proposal[3])  # data
-                strategy_address = decoded[0]['args'][0]
-                amount = decoded[0]['args'][1]
+                strategy_address = decoded[0]
+                amount = decoded[1]
             except:
                 # Fallback - use target as strategy
                 strategy_address = proposal[1]  # target

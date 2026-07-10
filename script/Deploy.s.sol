@@ -8,6 +8,7 @@ import {MessageBus} from "../contracts/MessageBus.sol";
 import {Governor} from "../contracts/Governor.sol";
 import {MockYieldStrategy} from "../contracts/YieldStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {MintableERC20} from "../contracts/MintableERC20.sol";
 
 /// @title DeploySwarmTreasury
 /// @notice Deploys all Swarm Treasury contracts and assigns agent roles
@@ -17,7 +18,7 @@ contract DeploySwarmTreasury is Script {
     MessageBus public messageBus;
     TreasuryVault public vault;
     Governor public governor;
-    ERC20 public mockToken;
+    MintableERC20 public mockToken;
     MockYieldStrategy public mockStrategy;
 
     function run() external {
@@ -51,6 +52,7 @@ contract DeploySwarmTreasury is Script {
         // 2. MessageBus
         messageBus = new MessageBus();
         messageBus.initialize();
+        messageBus.setAgentRegistry(address(registry));
         console.log("MessageBus:", address(messageBus));
 
         // 3. TreasuryVault
@@ -64,8 +66,9 @@ contract DeploySwarmTreasury is Script {
         console.log("Governor:", address(governor));
 
         // 5. Mock token & strategy
-        mockToken = new ERC20("Swarm USD", "sUSD");
+        mockToken = new MintableERC20("Swarm USD", "sUSD");
         console.log("MockToken:", address(mockToken));
+        console.log("Token supply (deployer):", mockToken.balanceOf(vm.addr(deployerPK)));
 
         mockStrategy = new MockYieldStrategy();
         console.log("MockStrategy:", address(mockStrategy));
@@ -79,16 +82,20 @@ contract DeploySwarmTreasury is Script {
         vault.grantRole(RISK_GUARD_ROLE,  riskGuardAddr);
         vault.grantRole(EXECUTOR_ROLE,    executorAddr);
 
+        // Governor contract (and its agent key) must be able to pause/withdraw via the vault
+        vault.grantRole(keccak256("GOVERNOR_ROLE"), address(governor));
+        vault.grantRole(keccak256("GOVERNOR_ROLE"), governorAddr);
+
         // 7. Whitelist token
         vault.addAssetToWhitelist(address(mockToken), 1_000_000 ether, 1000);
 
         // 8. Add strategy
         vault.addStrategy(address(mockStrategy), address(mockToken), 100_000 ether, 500, 30);
 
-        // 9. Register agents
-        registry.registerAgent(yieldScoutAddr, 1);
-        registry.registerAgent(riskGuardAddr,  2);
-        registry.registerAgent(executorAddr,   3);
+        vm.prank(governorAddr); registry.registerAgent(yieldScoutAddr, 1);
+        vm.prank(governorAddr); registry.registerAgent(riskGuardAddr, 2);
+        vm.prank(governorAddr); registry.registerAgent(executorAddr, 3);
+        vm.prank(governorAddr); registry.registerAgent(governorAddr, 4); // governor agent must be registered for approveProposal/postMessage
 
         vm.stopBroadcast();
 

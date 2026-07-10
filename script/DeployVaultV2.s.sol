@@ -23,6 +23,8 @@ contract DeployVaultV2 is Script {
         vault.grantRole(keccak256("YIELD_SCOUT_ROLE"), vm.addr(yieldPK));
         vault.grantRole(keccak256("RISK_GUARD_ROLE"), vm.addr(riskPK));
         vault.grantRole(keccak256("EXECUTOR_ROLE"), vm.addr(execPK));
+        // Allow the deployed Governor contract to pause/withdraw via this vault
+        vault.grantRole(keccak256("GOVERNOR_ROLE"), 0x088e7FA7271858f5Fb3E029818AC3e5A174aEEcd);
 
         address token = 0xC4A78F258fe5E97DD97C548BEAe237f202C4A37c;
         vault.addAssetToWhitelist(token, 1_000_000 ether, 1000);

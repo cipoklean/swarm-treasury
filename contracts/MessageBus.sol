@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {IMessageBus} from "./IMessageBus.sol";
+import {IAgentRegistry} from "./IAgentRegistry.sol";
 
 contract MessageBus is Initializable, OwnableUpgradeable, IMessageBus {
     uint256 public messageCount;
@@ -13,6 +14,12 @@ contract MessageBus is Initializable, OwnableUpgradeable, IMessageBus {
     mapping(uint256 => bool) public messageExistsMap;
 
     uint256 public constant MESSAGE_EXPIRY_BLOCKS = 10;
+
+    address public agentRegistry;
+
+    function setAgentRegistry(address _agentRegistry) external onlyOwner {
+        agentRegistry = _agentRegistry;
+    }
 
     function initialize() external initializer {
         __Ownable_init();
@@ -27,6 +34,9 @@ contract MessageBus is Initializable, OwnableUpgradeable, IMessageBus {
     ) external override returns (uint256) {
         require(agentRole >= 1 && agentRole <= 4, "Invalid agent role");
         require(messageType >= 0 && messageType <= 2, "Invalid message type");
+        if (agentRegistry != address(0)) {
+            require(IAgentRegistry(agentRegistry).isAgent(msg.sender), "Not a registered agent");
+        }
 
         messageCount++;
         uint256 messageId = messageCount;
