@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
 from botchain_client import get_botchain_client
+from control_state import ControlState
 
 # Configure logging
 logging.basicConfig(
@@ -292,10 +293,19 @@ class RiskGuard:
     async def run(self) -> None:
         """Main agent loop"""
         logger.info("Risk Guard agent started")
-        
+        self.control = ControlState()
+
         while True:
             try:
-                # Check for new proposals
+                # --- bot control plane ---
+                if self.control.should_stop():
+                    logger.info("Stop signal received — shutting down Risk Guard.")
+                    return
+                if self.control.should_pause():
+                    logger.info("Paused via control signal — waiting...")
+                    await asyncio.sleep(2)
+                    continue
+
                 new_proposals = await self.check_new_proposals()
                 
                 for proposal_id in new_proposals:

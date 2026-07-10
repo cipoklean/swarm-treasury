@@ -1,3 +1,4 @@
 web3>=6.0.0
 plyer>=2.0.0
 python-dotenv>=1.0.0
+redis>=4.0.0  # optional: control-plane Redis backend (cross-service deploys)

@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
 from botchain_client import get_botchain_client
+from control_state import ControlState
 from plyer import notification
 
 # Configure logging
@@ -405,9 +406,19 @@ class Governor:
     async def run(self) -> None:
         """Main agent loop"""
         logger.info("Governor agent started")
-        
+        self.control = ControlState()
+
         while True:
             try:
+                # --- bot control plane ---
+                if self.control.should_stop():
+                    logger.info("Stop signal received — shutting down Governor.")
+                    return
+                if self.control.should_pause():
+                    logger.info("Paused via control signal — waiting...")
+                    await asyncio.sleep(2)
+                    continue
+
                 # Vote on all new proposals that need votes
                 proposal_count = self.treasury_vault.functions.proposalCount().call()
                 for proposal_id in range(1, proposal_count + 1):

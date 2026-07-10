@@ -12,6 +12,7 @@ import time
 from typing import Dict, Any, List, Optional
 
 from botchain_client import BotChainClient, get_botchain_client
+from control_state import ControlState
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,8 +112,18 @@ class Executor:
 
     async def run(self) -> None:
         logger.info("Executor agent started")
+        self.control = ControlState()
         while True:
             try:
+                # --- bot control plane ---
+                if self.control.should_stop():
+                    logger.info("Stop signal received — shutting down Executor.")
+                    return
+                if self.control.should_pause():
+                    logger.info("Paused via control signal — waiting...")
+                    await asyncio.sleep(2)
+                    continue
+
                 approved_actions = await self.check_approved_proposals()
                 for action in approved_actions:
                     await self.execute_action(action)

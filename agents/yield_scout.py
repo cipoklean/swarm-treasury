@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
 
 from botchain_client import get_botchain_client, BotChainClient
+from control_state import ControlState
 
 # Configure logging
 logging.basicConfig(
@@ -283,9 +284,19 @@ class YieldScout:
     async def run(self) -> None:
         """Main agent loop"""
         logger.info("Yield Scout agent started")
-        
+        self.control = ControlState()
+
         while True:
             try:
+                # --- bot control plane ---
+                if self.control.should_stop():
+                    logger.info("Stop signal received — shutting down Yield Scout.")
+                    return
+                if self.control.should_pause():
+                    logger.info("Paused via control signal — waiting...")
+                    await asyncio.sleep(2)
+                    continue
+
                 # Get current block
                 current_block = await self.client.get_latest_block()
                 current_block_number = current_block['number']

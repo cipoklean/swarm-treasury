@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import AgentStatusPanel from './components/AgentStatusPanel';
+import ControlPanel from './components/ControlPanel';
 import LiveMessageFeed from './components/LiveMessageFeed';
 import { TreasuryMetrics, TransactionLog, GovernorPanel, BlockTimeTicker } from './components';
 import { useBlockchain, useAgentMessages } from './hooks/useBlockchain';
@@ -92,6 +93,11 @@ const App: React.FC = () => {
 
       {/* ── Block Ticker ── */}
       <BlockTimeTicker blockNumber={blockNumber} blockTime={blockTime} networkStatus={networkStatus} />
+
+      {/* ── Bot Control (Phase 1: start / pause / stop) ── */}
+      <div style={{ marginBottom: '20px' }}>
+        <ControlPanel />
+      </div>
 
       {/* ── Top Row: Agents + Treasury ── */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px', marginBottom:'20px' }}>
