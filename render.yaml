@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: swarm-treasury-dashboard
+    runtime: node
+    rootDir: dashboard
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: NODE_ENV
+        value: production
