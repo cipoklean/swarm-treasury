@@ -1,44 +1,86 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
+import { ethers } from 'ethers';
 import { C } from '../theme';
+import { useWallet } from '../wallet';
+import { ADDRESSES, RPC_URL } from '../deployment';
+import { ABIS } from '../abis.generated';
 
-// Status colors (kept literal so the panel works even if theme tokens shift)
 const GREEN = '#3fb950';
 const AMBER = '#d29922';
 const RED = '#f85149';
 
-type ControlState = { paused: boolean; stop: boolean };
+type Ctrl = { paused: boolean; stop: boolean };
 
 const ControlPanel: React.FC = () => {
-  const [state, setState] = useState<ControlState>({ paused: false, stop: false });
+  const { address, signer, connect, connecting } = useWallet();
+  const [state, setState] = useState<Ctrl>({ paused: false, stop: false });
   const [busy, setBusy] = useState(false);
+  const [isGovernor, setIsGovernor] = useState<boolean | null>(null);
+  const [govMsg, setGovMsg] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const r = await fetch('/control');
       if (r.ok) setState(await r.json());
     } catch {
-      /* server not running — leave last known state */
+      /* server not running */
     }
   }, []);
-
   useEffect(() => {
     refresh();
     const i = setInterval(refresh, 3000);
     return () => clearInterval(i);
   }, [refresh]);
 
+  // Is the connected wallet the governor/owner? (read-only call)
+  useEffect(() => {
+    if (!address) {
+      setIsGovernor(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = new ethers.JsonRpcProvider(RPC_URL);
+        const gov = new ethers.Contract(ADDRESSES.Governor, ABIS.governor, p);
+        const owner = (await gov.owner()).toLowerCase();
+        if (!cancelled) setIsGovernor(owner === address.toLowerCase());
+      } catch {
+        if (!cancelled) setIsGovernor(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
+
   const send = async (action: string) => {
     setBusy(true);
     try {
       const r = await fetch('/control', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action }),
       });
       if (r.ok) setState(await r.json());
     } catch {
-      /* ignore network errors */
+      /* ignore */
+    }
+    setBusy(false);
+  };
+
+  const emergency = async () => {
+    setBusy(true);
+    setGovMsg(null);
+    try {
+      if (!signer) throw new Error('Connect the governor wallet first');
+      const gov = new ethers.Contract(ADDRESSES.Governor, ABIS.governor, signer);
+      const tx = await gov.emergencyPause();
+      setGovMsg('Emergency pause sent · tx ' + tx.hash.slice(0, 10) + '…');
+      await send('stop');
+    } catch (e: any) {
+      setGovMsg('Emergency failed: ' + (e?.message || e));
     }
     setBusy(false);
   };
@@ -74,15 +116,34 @@ const ControlPanel: React.FC = () => {
           </span>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-        <button onClick={() => send('start')} disabled={busy} style={btn(GREEN)}>▶ Resume</button>
-        <button onClick={() => send('pause')} disabled={busy} style={btn(AMBER)}>⏸ Pause</button>
-        <button onClick={() => send('stop')} disabled={busy} style={btn(RED)}>⏹ Stop</button>
-        <button onClick={() => send('reset')} disabled={busy} style={btnSecondary()}>↺ Reset</button>
-      </div>
-      <p style={{ margin: '12px 0 0', fontSize: '0.62rem', color: C.muted, fontFamily: 'JetBrains Mono, monospace' }}>
-        Wallet-gated controls arrive in Phase 2 — for now anyone with the URL can pause/stop.
-      </p>
+
+      {!address && (
+        <button onClick={connect} disabled={connecting} style={btn(GREEN)}>
+          {connecting ? 'Connecting…' : 'Connect Wallet to control'}
+        </button>
+      )}
+
+      {address && isGovernor === false && (
+        <div style={{ fontSize: '0.72rem', color: C.muted, fontFamily: 'JetBrains Mono, monospace' }}>
+          Connected · not governor (read-only)
+        </div>
+      )}
+
+      {address && isGovernor && (
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <button onClick={() => send('start')} disabled={busy} style={btn(GREEN)}>▶ Resume</button>
+          <button onClick={() => send('pause')} disabled={busy} style={btn(AMBER)}>⏸ Pause</button>
+          <button onClick={() => send('stop')} disabled={busy} style={btn(RED)}>⏹ Stop</button>
+          <button onClick={() => send('reset')} disabled={busy} style={btnSecondary()}>↺ Reset</button>
+          <button onClick={emergency} disabled={busy} style={btn(RED)}>⚠ Emergency Pause (chain)</button>
+        </div>
+      )}
+
+      {govMsg && (
+        <p style={{ margin: '10px 0 0', fontSize: '0.66rem', color: C.muted, fontFamily: 'JetBrains Mono, monospace' }}>
+          {govMsg}
+        </p>
+      )}
     </motion.div>
   );
 };

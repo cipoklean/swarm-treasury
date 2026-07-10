@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import AgentStatusPanel from './components/AgentStatusPanel';
 import ControlPanel from './components/ControlPanel';
+import { ConnectButton } from './wallet';
 import LiveMessageFeed from './components/LiveMessageFeed';
 import { TreasuryMetrics, TransactionLog, GovernorPanel, BlockTimeTicker } from './components';
 import { useBlockchain, useAgentMessages } from './hooks/useBlockchain';
@@ -12,7 +13,7 @@ const chain = CHAINS[ACTIVE_CHAIN_ID] || CHAINS[31337];
 const addresses = DEPLOYED_ADDRESSES[ACTIVE_CHAIN_ID as keyof typeof DEPLOYED_ADDRESSES];
 
 const App: React.FC = () => {
-  const { blockNumber, blockTime, networkStatus } = useBlockchain();
+  const { blockNumber, blockTime, networkStatus, demoMode, treasuryBalance, apy } = useBlockchain();
   const { messages, isLoading } = useAgentMessages();
 
   const [agents] = useState([
@@ -69,6 +70,9 @@ const App: React.FC = () => {
           <p style={{ fontSize:'0.75rem', color:C.secondary, margin:'4px 0 0', letterSpacing:'0.5px' }}>
             {chain.name} &nbsp;·&nbsp; Multi-Agent Autonomous Treasury
           </p>
+          {demoMode && (
+            <span style={{ marginLeft:'10px', fontSize:'0.6rem', fontWeight:700, color:'#d29922', border:`1px solid #d2992255`, borderRadius:'6px', padding:'2px 8px', letterSpacing:'1px' }}>DEMO</span>
+          )}
         </div>
         <div style={{
           display:'flex', alignItems:'center', gap:'10px',
@@ -76,6 +80,7 @@ const App: React.FC = () => {
           border:`1px solid ${C.border}`, borderRadius:'10px',
           padding:'10px 18px',
         }}>
+          <ConnectButton />
           <motion.div
             animate={{ scale:[1,1.15,1] }} transition={{ duration:2, repeat:Infinity }}
             style={{ width:8, height:8, borderRadius:'50%', background:C.green, boxShadow:`0 0 10px ${C.green}66` }}
@@ -106,9 +111,9 @@ const App: React.FC = () => {
         </motion.div>
         <motion.div initial={{opacity:0,x:20}} animate={{opacity:1,x:0}} transition={{delay:0.15,duration:0.5}}>
           <TreasuryMetrics
-            balance={treasuryData.balance}
-            projectedBalance={treasuryData.projectedBalance}
-            apy={treasuryData.apy}
+            balance={treasuryBalance}
+            projectedBalance={Math.round(treasuryBalance * (1 + apy / 100))}
+            apy={apy}
             balanceHistory={treasuryData.balanceHistory}
           />
         </motion.div>
