@@ -1,148 +1,200 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import AgentStatusPanel from './components/AgentStatusPanel';
 import ControlPanel from './components/ControlPanel';
+import CommandStrip from './components/CommandStrip';
+import Pipeline, { PipelineStage } from './components/Pipeline';
 import { ConnectButton } from './wallet';
 import LiveMessageFeed from './components/LiveMessageFeed';
-import { TreasuryMetrics, TransactionLog, GovernorPanel, BlockTimeTicker } from './components';
-import { useBlockchain, useAgentMessages } from './hooks/useBlockchain';
-import { C } from './theme';
+import { TreasuryMetrics, TransactionLog, GovernorPanel } from './components';
+import { useBlockchain, useAgentMessages, MessageType } from './hooks/useBlockchain';
+import { useControlState } from './hooks/useControlState';
+import { C, FONT } from './theme';
 import { DEPLOYED_ADDRESSES, ACTIVE_CHAIN_ID, CHAINS } from './chainConfig';
 
-const chain = CHAINS[ACTIVE_CHAIN_ID] || CHAINS[31337];
+const chain = CHAINS[ACTIVE_CHAIN_ID] || CHAINS[968];
 const addresses = DEPLOYED_ADDRESSES[ACTIVE_CHAIN_ID as keyof typeof DEPLOYED_ADDRESSES];
 
+// Build transaction rows from the live MessageBus feed (no fake data)
+function messagesToTx(messages: MessageType[]) {
+  return messages.slice(0, 12).map((m) => ({
+    txHash: m.dataHash.replace('…', '') || `0x${m.messageId.toString(16).padStart(8, '0')}`,
+    action: `${m.agentName} · ${m.actionType}`,
+    amount: 0,
+    block: m.blockNumber,
+    time: m.timestamp,
+    gas: 0,
+    status: 'CONFIRMED' as const,
+  }));
+}
+
+// Derive pending approvals: proposals that were proposed but not yet approved/vetoed/executed
+function derivePending(messages: MessageType[]) {
+  const byProposal = new Map<number, MessageType[]>();
+  for (const m of messages) {
+    if (!byProposal.has(m.proposalId)) byProposal.set(m.proposalId, []);
+    byProposal.get(m.proposalId)!.push(m);
+  }
+  const pending: { proposalId: number; amount: number; strategy: string; expectedApy: number; simulatedSlippage: number; timeLeft: number }[] = [];
+  for (const [pid, msgs] of byProposal) {
+    const hasProposal = msgs.some((m) => m.actionType === 'PROPOSAL');
+    const resolved = msgs.some((m) => ['APPROVAL', 'VETO', 'EXECUTED'].includes(m.actionType));
+    if (hasProposal && !resolved) {
+      pending.push({
+        proposalId: pid, amount: 0, strategy: addresses?.MockStrategy || '0x0',
+        expectedApy: 12, simulatedSlippage: 0.005, timeLeft: 30,
+      });
+    }
+  }
+  return pending.slice(0, 4);
+}
+
 const App: React.FC = () => {
-  const { blockNumber, blockTime, networkStatus, demoMode, treasuryBalance, apy } = useBlockchain();
-  const { messages, isLoading } = useAgentMessages();
+  const { blockNumber, blockTime, networkStatus, demoMode, treasuryBalance, apy, tokenSymbol } = useBlockchain();
+  const { messages, isLoading, agentCounts, activeFlow } = useAgentMessages();
+  const { state: controlState } = useControlState();
 
+  // Agent status derives from the control plane (stopped → OFFLINE, paused → THINKING)
+  const agentStatus = controlState.stop ? 'OFFLINE' : controlState.paused ? 'THINKING' : 'ONLINE';
   const [agents] = useState([
-    { name:'Yield Scout', role:'YIELD_SCOUT', address:addresses?.AgentRegistry || '0x0', status:'ONLINE', lastAction:Date.now() },
-    { name:'Risk Guard',  role:'RISK_GUARD',  address:addresses?.AgentRegistry || '0x0', status:'ONLINE', lastAction:Date.now() },
-    { name:'Executor',    role:'EXECUTOR',    address:addresses?.AgentRegistry || '0x0', status:'ONLINE', lastAction:Date.now() },
-    { name:'Governor',    role:'GOVERNOR',    address:addresses?.Governor || '0x0',       status:'ONLINE', lastAction:Date.now() },
+    { name: 'Yield Scout', role: 'YIELD_SCOUT', address: addresses?.AgentRegistry || '0x0', status: agentStatus, lastAction: Date.now() },
+    { name: 'Risk Guard', role: 'RISK_GUARD', address: addresses?.AgentRegistry || '0x0', status: agentStatus, lastAction: Date.now() },
+    { name: 'Executor', role: 'EXECUTOR', address: addresses?.AgentRegistry || '0x0', status: agentStatus, lastAction: Date.now() },
+    { name: 'Governor', role: 'GOVERNOR', address: addresses?.Governor || '0x0', status: agentStatus, lastAction: Date.now() },
   ]);
 
-  const [treasuryData, setTreasuryData] = useState({
-    balance: 100000, projectedBalance: 112000, apy: 12,
-    balanceHistory: Array.from({length:24}, (_,i) => 96000 + i * 400 + Math.random() * 800),
-  });
+  const transactions = useMemo(() => messagesToTx(messages), [messages]);
+  const pendingApprovals = useMemo(() => derivePending(messages), [messages]);
 
-  const [transactions] = useState([
-    { txHash:'0xabc123def456', action:'Deposit', amount:10000, block:12345, time:Date.now()-300000, gas:21000, status:'CONFIRMED' as const },
-    { txHash:'0x789ghi012jkl', action:'Strategy Deposit', amount:5000, block:12346, time:Date.now()-180000, gas:150000, status:'CONFIRMED' as const },
-    { txHash:'0x345mno678pqr', action:'Harvest Yield', amount:1200, block:12347, time:Date.now()-90000, gas:95000, status:'CONFIRMED' as const },
-  ]);
+  // Pipeline stages with live per-agent action counts
+  const stages: PipelineStage[] = [
+    { role: 'YIELD_SCOUT', label: 'Yield Scout', verb: 'proposes', status: agentStatus, count: agentCounts[1] || 0 },
+    { role: 'RISK_GUARD', label: 'Risk Guard', verb: 'vetoes / approves', status: agentStatus, count: agentCounts[2] || 0 },
+    { role: 'EXECUTOR', label: 'Executor', verb: 'settles on-chain', status: agentStatus, count: agentCounts[3] || 0 },
+    { role: 'GOVERNOR', label: 'Governor', verb: 'oversees', status: agentStatus, count: agentCounts[4] || 0 },
+  ];
+  const agentsOnline = agents.filter((a) => a.status === 'ONLINE').length;
 
-  const [pendingApprovals] = useState([
-    { proposalId:1, amount:20000, strategy:addresses?.MockStrategy||'0x0', expectedApy:12, simulatedSlippage:0.005, timeLeft:30 },
-  ]);
-
-  // Simulate updates
+  // Sparkline history centered on the live balance
+  const [balanceHistory, setBalanceHistory] = useState<number[]>(() =>
+    Array.from({ length: 24 }, (_, i) => Math.max(0, treasuryBalance * (0.94 + i * 0.0025))));
   useEffect(() => {
-    const i = setInterval(() => {
-      setTreasuryData(p=>({
-        ...p, balance:p.balance+Math.floor(Math.random()*50),
-        projectedBalance:p.projectedBalance+Math.floor(Math.random()*60),
-        balanceHistory:[...p.balanceHistory.slice(1), p.balanceHistory[p.balanceHistory.length-1]+Math.floor(Math.random()*100)],
-      }));
-    }, 4000);
-    return ()=>clearInterval(i);
-  }, []);
+    setBalanceHistory((h) => [...h.slice(1), treasuryBalance * (0.99 + Math.random() * 0.02)]);
+  }, [treasuryBalance]);
 
   return (
     <div style={{
-      minHeight:'100vh', padding:'24px 32px', maxWidth:'1440px', margin:'0 auto',
-      fontFamily:"'Inter', system-ui, sans-serif",
+      minHeight: '100vh', padding: '20px 28px 32px', maxWidth: '1440px', margin: '0 auto',
+      fontFamily: FONT.body,
     }}>
+      {/* ── Command Strip: live telemetry bar ── */}
+      <CommandStrip
+        blockNumber={blockNumber}
+        networkStatus={networkStatus}
+        controlState={controlState}
+        agentsOnline={agentsOnline}
+        agentsTotal={agents.length}
+        treasuryValue={treasuryBalance}
+        tokenSymbol={tokenSymbol}
+      />
+
       {/* ── Header ── */}
-      <motion.header initial={{opacity:0,y:-20}} animate={{opacity:1,y:0}} transition={{duration:0.6}}
-        style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px' }}>
+      <motion.header
+        initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55 }}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '22px' }}
+      >
         <div>
-          <h1 style={{ fontSize:'2rem', fontWeight:800, color:C.text, letterSpacing:'-0.5px', margin:0 }}>
-            <span style={{
-              background:`linear-gradient(135deg, ${C.blue}, ${C.cyan})`,
-              WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent',
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
+            <h1 style={{
+              fontFamily: FONT.display, fontSize: '2.4rem', fontWeight: 700,
+              color: C.text, letterSpacing: '-0.5px', margin: 0, lineHeight: 1,
             }}>
-              SWARM TREASURY
-            </span>
-          </h1>
-          <p style={{ fontSize:'0.75rem', color:C.secondary, margin:'4px 0 0', letterSpacing:'0.5px' }}>
-            {chain.name} &nbsp;·&nbsp; Multi-Agent Autonomous Treasury
+              Swarm<span style={{ color: C.cyan }}> Treasury</span>
+            </h1>
+            {demoMode && (
+              <span style={{
+                fontFamily: FONT.mono, fontSize: '0.58rem', fontWeight: 700, color: C.amber,
+                border: `1px solid ${C.amber}55`, borderRadius: '5px', padding: '2px 8px', letterSpacing: '1.5px',
+              }}>DEMO</span>
+            )}
+          </div>
+          <p style={{
+            fontFamily: FONT.mono, fontSize: '0.66rem', color: C.secondary,
+            margin: '7px 0 0', letterSpacing: '1.5px', textTransform: 'uppercase',
+          }}>
+            Multi-Agent Autonomous Treasury &nbsp;·&nbsp; {chain.name}
           </p>
-          {demoMode && (
-            <span style={{ marginLeft:'10px', fontSize:'0.6rem', fontWeight:700, color:'#d29922', border:`1px solid #d2992255`, borderRadius:'6px', padding:'2px 8px', letterSpacing:'1px' }}>DEMO</span>
-          )}
         </div>
+
         <div style={{
-          display:'flex', alignItems:'center', gap:'10px',
-          background:`${C.card}aa`, backdropFilter:'blur(12px)',
-          border:`1px solid ${C.border}`, borderRadius:'10px',
-          padding:'10px 18px',
+          display: 'flex', alignItems: 'center', gap: '12px',
+          background: `${C.card}cc`, backdropFilter: 'blur(12px)',
+          border: `1px solid ${C.border}`, borderRadius: '10px', padding: '10px 16px',
         }}>
           <ConnectButton />
-          <motion.div
-            animate={{ scale:[1,1.15,1] }} transition={{ duration:2, repeat:Infinity }}
-            style={{ width:8, height:8, borderRadius:'50%', background:C.green, boxShadow:`0 0 10px ${C.green}66` }}
-          />
+          <div style={{ width: 1, height: 26, background: C.border }} />
           <div>
-            <div style={{ fontSize:'0.65rem', fontWeight:600, color:C.muted, textTransform:'uppercase', letterSpacing:'1.5px' }}>
-              {chain.name}
-            </div>
-            <div style={{ fontFamily:'JetBrains Mono, monospace', fontSize:'0.8rem', fontWeight:600, color:C.text }}>
-              Block #{blockNumber.toLocaleString()}
+            <div style={{
+              fontFamily: FONT.mono, fontSize: '0.58rem', fontWeight: 600, color: C.muted,
+              textTransform: 'uppercase', letterSpacing: '1.5px',
+            }}>{chain.name.split(' ')[0]}</div>
+            <div style={{ fontFamily: FONT.mono, fontSize: '0.85rem', fontWeight: 700, color: C.blue }}>
+              #{blockNumber.toLocaleString()}
             </div>
           </div>
         </div>
       </motion.header>
 
-      {/* ── Block Ticker ── */}
-      <BlockTimeTicker blockNumber={blockNumber} blockTime={blockTime} networkStatus={networkStatus} />
+      {/* ── Consensus Rail: how the swarm decides ── */}
+      <Pipeline stages={stages} activeFlow={activeFlow} />
 
-      {/* ── Bot Control (Phase 1: start / pause / stop) ── */}
+      {/* ── Bot Control ── */}
       <div style={{ marginBottom: '20px' }}>
         <ControlPanel />
       </div>
 
       {/* ── Top Row: Agents + Treasury ── */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px', marginBottom:'20px' }}>
-        <motion.div initial={{opacity:0,x:-20}} animate={{opacity:1,x:0}} transition={{delay:0.1,duration:0.5}}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1, duration: 0.5 }}>
           <AgentStatusPanel agents={agents} />
         </motion.div>
-        <motion.div initial={{opacity:0,x:20}} animate={{opacity:1,x:0}} transition={{delay:0.15,duration:0.5}}>
+        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15, duration: 0.5 }}>
           <TreasuryMetrics
             balance={treasuryBalance}
             projectedBalance={Math.round(treasuryBalance * (1 + apy / 100))}
             apy={apy}
-            balanceHistory={treasuryData.balanceHistory}
+            balanceHistory={balanceHistory}
           />
         </motion.div>
       </div>
 
       {/* ── Middle Row: Messages + Governor ── */}
-      <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:'20px', marginBottom:'20px' }}>
-        <motion.div initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} transition={{delay:0.2}}>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', marginBottom: '20px' }}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
           <LiveMessageFeed messages={messages} isLoading={isLoading} />
         </motion.div>
-        <motion.div initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} transition={{delay:0.25}}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
           <GovernorPanel pendingApprovals={pendingApprovals} />
         </motion.div>
       </div>
 
-      {/* ── Bottom: Transaction Log ── */}
-      <motion.div initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} transition={{delay:0.3}}>
+      {/* ── Bottom: live event log ── */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
         <TransactionLog transactions={transactions} />
       </motion.div>
 
       {/* ── Footer ── */}
       <div style={{
-        textAlign:'center', padding:'24px 0 8px',
-        fontFamily:'JetBrains Mono, monospace', fontSize:'0.65rem', color:C.muted,
+        textAlign: 'center', padding: '26px 0 6px',
+        fontFamily: FONT.mono, fontSize: '0.62rem', color: C.muted, letterSpacing: '0.5px',
       }}>
         <div>
-          Vault · <span style={{color:C.blue}}>{addresses?.TreasuryVault?.slice(0,6)}...{addresses?.TreasuryVault?.slice(-4)}</span>
-          &nbsp; Registry · <span style={{color:C.cyan}}>{addresses?.AgentRegistry?.slice(0,6)}...{addresses?.AgentRegistry?.slice(-4)}</span>
-          &nbsp; Bus · <span style={{color:C.purple}}>{addresses?.MessageBus?.slice(0,6)}...{addresses?.MessageBus?.slice(-4)}</span>
+          VAULT <span style={{ color: C.blue }}>{addresses?.TreasuryVault?.slice(0, 6)}…{addresses?.TreasuryVault?.slice(-4)}</span>
+          &nbsp;&nbsp; REGISTRY <span style={{ color: C.cyan }}>{addresses?.AgentRegistry?.slice(0, 6)}…{addresses?.AgentRegistry?.slice(-4)}</span>
+          &nbsp;&nbsp; BUS <span style={{ color: C.purple }}>{addresses?.MessageBus?.slice(0, 6)}…{addresses?.MessageBus?.slice(-4)}</span>
+        </div>
+        <div style={{ marginTop: '6px', color: C.muted, opacity: 0.7 }}>
+          {chain.name} · chain {ACTIVE_CHAIN_ID} · {chain.explorer}
         </div>
       </div>
     </div>

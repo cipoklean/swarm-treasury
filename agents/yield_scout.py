@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import time
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
@@ -285,6 +286,13 @@ class YieldScout:
         """Main agent loop"""
         logger.info("Yield Scout agent started")
         self.control = ControlState()
+
+        # Graceful shutdown on SIGTERM (Docker/Render) and SIGINT (Ctrl+C)
+        def _shutdown(signum, frame):
+            logger.info(f"Received signal {signum} — requesting stop")
+            self.control.stop()
+        signal.signal(signal.SIGTERM, _shutdown)
+        signal.signal(signal.SIGINT, _shutdown)
 
         while True:
             try:

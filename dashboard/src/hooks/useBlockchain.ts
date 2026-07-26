@@ -177,7 +177,17 @@ export const useAgentMessages = () => {
     };
   }, []);
 
-  return { messages, isLoading, demo };
+  // Per-agent action counts (role 1..4) derived from the live feed
+  const agentCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  for (const m of messages) {
+    const r = Number(m.agentRole);
+    if (r >= 1 && r <= 4) agentCounts[r] += 1;
+  }
+
+  // A proposal is "flowing" if any message landed in the last 30s
+  const activeFlow = messages.some((m) => Date.now() - m.timestamp < 30_000);
+
+  return { messages, isLoading, demo, agentCounts, activeFlow };
 };
 
 export default useBlockchain;

@@ -190,11 +190,16 @@ contract TreasuryVaultTest is Test {
         vm.prank(yieldScout);
         vault.createProposal(address(token), 0, abi.encodeWithSignature("balanceOf(address)", address(vault)), "test");
 
+        // Vote to meet quorum (voting starts at deadline - votingPeriod)
         vm.roll(2);
+        vm.prank(yieldScout);
+        vault.vote(1, true);
+
         vm.prank(riskGuard);
         vault.approveProposal(1);
 
-        vm.roll(20);
+        // Wait for execution delay (approvedAtBlock=2 + EXECUTION_DELAY=100)
+        vm.roll(103);
         vm.prank(executor);
         vault.executeProposal(1);
 
@@ -206,9 +211,11 @@ contract TreasuryVaultTest is Test {
         vm.prank(yieldScout);
         vault.createProposal(address(token), 0, abi.encodeWithSignature("balanceOf(address)", address(vault)), "test");
         vm.roll(2);
+        vm.prank(yieldScout);
+        vault.vote(1, true);
         vm.prank(riskGuard);
         vault.approveProposal(1);
-        vm.roll(20);
+        vm.roll(103);
         vm.prank(stranger);
         vm.expectRevert(); // onlyRole(EXECUTOR_ROLE)
         vault.executeProposal(1);
@@ -220,9 +227,11 @@ contract TreasuryVaultTest is Test {
         vm.prank(yieldScout);
         vault.createProposal(address(vault), 0, data, "pause attempt");
         vm.roll(2);
+        vm.prank(yieldScout);
+        vault.vote(1, true);
         vm.prank(riskGuard);
         vault.approveProposal(1);
-        vm.roll(20);
+        vm.roll(103);
         vm.prank(executor);
         vm.expectRevert("Unsupported vault action");
         vault.executeProposal(1);
@@ -261,10 +270,13 @@ contract TreasuryVaultTest is Test {
         vault.createProposal(address(vault), 0, data, "deposit to strategy");
 
         vm.roll(2);
+        vm.prank(yieldScout);
+        vault.vote(1, true);
         vm.prank(riskGuard);
         vault.approveProposal(1);
 
-        vm.roll(20);
+        // Wait for execution delay
+        vm.roll(103);
         vm.prank(executor);
         vault.executeProposal(1);
 
@@ -290,9 +302,11 @@ contract TreasuryVaultTest is Test {
         vm.prank(yieldScout);
         vault.createProposal(address(vault), 0, data, "deposit");
         vm.roll(2);
+        vm.prank(yieldScout);
+        vault.vote(1, true);
         vm.prank(riskGuard);
         vault.approveProposal(1);
-        vm.roll(20);
+        vm.roll(103);
         vm.prank(executor);
         vault.executeProposal(1);
 
@@ -300,10 +314,12 @@ contract TreasuryVaultTest is Test {
         bytes memory wdata = abi.encodeWithSelector(vault.withdrawFromStrategy.selector, address(strategy), 500 ether);
         vm.prank(yieldScout);
         vault.createProposal(address(vault), 0, wdata, "withdraw");
-        vm.roll(22);
+        vm.roll(104);
+        vm.prank(yieldScout);
+        vault.vote(2, true);
         vm.prank(riskGuard);
         vault.approveProposal(2);
-        vm.roll(40);
+        vm.roll(205);
         vm.prank(executor);
         vault.executeProposal(2);
 
@@ -328,9 +344,11 @@ contract TreasuryVaultTest is Test {
         vm.prank(yieldScout);
         vault.createProposal(address(vault), 0, data, "deposit");
         vm.roll(2);
+        vm.prank(yieldScout);
+        vault.vote(1, true);
         vm.prank(riskGuard);
         vault.approveProposal(1);
-        vm.roll(20);
+        vm.roll(103);
         vm.prank(executor);
         vault.executeProposal(1);
 

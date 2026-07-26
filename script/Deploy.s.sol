@@ -47,6 +47,7 @@ contract DeploySwarmTreasury is Script {
         registry = new AgentRegistry();
         registry.initialize(vm.addr(deployerPK));
         registry.grantRole(keccak256("GOVERNOR_ROLE"), governorAddr);
+        registry.grantRole(keccak256("GOVERNOR_ROLE"), vm.addr(deployerPK)); // deployer registers agents during deploy (revoke post-deploy for production)
         console.log("AgentRegistry:", address(registry));
 
         // 2. MessageBus
@@ -92,10 +93,11 @@ contract DeploySwarmTreasury is Script {
         // 8. Add strategy
         vault.addStrategy(address(mockStrategy), address(mockToken), 100_000 ether, 500, 30);
 
-        vm.prank(governorAddr); registry.registerAgent(yieldScoutAddr, 1);
-        vm.prank(governorAddr); registry.registerAgent(riskGuardAddr, 2);
-        vm.prank(governorAddr); registry.registerAgent(executorAddr, 3);
-        vm.prank(governorAddr); registry.registerAgent(governorAddr, 4); // governor agent must be registered for approveProposal/postMessage
+        // Register agents as deployer (deployer was granted GOVERNOR_ROLE above; only the deployer key is needed for broadcast)
+        registry.registerAgent(yieldScoutAddr, 1);
+        registry.registerAgent(riskGuardAddr, 2);
+        registry.registerAgent(executorAddr, 3);
+        registry.registerAgent(governorAddr, 4); // governor agent must be registered for approveProposal/postMessage
 
         vm.stopBroadcast();
 

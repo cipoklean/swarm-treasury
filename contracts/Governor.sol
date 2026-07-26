@@ -25,7 +25,7 @@ contract Governor is Initializable, OwnableUpgradeable, PausableUpgradeable, Acc
     uint256 public apyThreshold = 1000; // 10% in basis points
     uint256 public largeMoveThreshold = 2000; // 20% in basis points
 
-    uint256 public parameterUpdateTimelock = 24; // 24 blocks for parameter changes
+    uint256 public parameterUpdateTimelock = 24 hours; // time-based timelock for parameter changes
     mapping(bytes32 => uint256) public pendingParameterUpdates;
     mapping(bytes32 => uint256) public parameterUpdateTimestamps;
 
@@ -76,67 +76,67 @@ contract Governor is Initializable, OwnableUpgradeable, PausableUpgradeable, Acc
         require(newTolerance <= 1000, "Slippage tolerance too high"); // Cap at 10%
         
         pendingParameterUpdates["slippageTolerance"] = newTolerance;
-        parameterUpdateTimestamps["slippageTolerance"] = block.number + parameterUpdateTimelock;
+        parameterUpdateTimestamps["slippageTolerance"] = block.timestamp + parameterUpdateTimelock;
         
-        emit ParameterUpdateScheduled("slippageTolerance", slippageTolerance, newTolerance, block.number + parameterUpdateTimelock);
+        emit ParameterUpdateScheduled("slippageTolerance", slippageTolerance, newTolerance, block.timestamp + parameterUpdateTimelock);
     }
 
     function setTimelockDuration(uint256 newDuration) external override onlyRole(GOVERNOR_ROLE) {
         require(newDuration >= 2, "Timelock duration too short");
         
         pendingParameterUpdates["timelockDuration"] = newDuration;
-        parameterUpdateTimestamps["timelockDuration"] = block.number + parameterUpdateTimelock;
+        parameterUpdateTimestamps["timelockDuration"] = block.timestamp + parameterUpdateTimelock;
         
-        emit ParameterUpdateScheduled("timelockDuration", timelockDuration, newDuration, block.number + parameterUpdateTimelock);
+        emit ParameterUpdateScheduled("timelockDuration", timelockDuration, newDuration, block.timestamp + parameterUpdateTimelock);
     }
 
     function setAPYThreshold(uint256 newThreshold) external override onlyRole(GOVERNOR_ROLE) {
         require(newThreshold <= 10000, "APY threshold too high"); // Cap at 100%
         
         pendingParameterUpdates["apyThreshold"] = newThreshold;
-        parameterUpdateTimestamps["apyThreshold"] = block.number + parameterUpdateTimelock;
+        parameterUpdateTimestamps["apyThreshold"] = block.timestamp + parameterUpdateTimelock;
         
-        emit ParameterUpdateScheduled("apyThreshold", apyThreshold, newThreshold, block.number + parameterUpdateTimelock);
+        emit ParameterUpdateScheduled("apyThreshold", apyThreshold, newThreshold, block.timestamp + parameterUpdateTimelock);
     }
 
     function setLargeMoveThreshold(uint256 newThreshold) external override onlyRole(GOVERNOR_ROLE) {
         require(newThreshold <= 5000, "Large move threshold too high"); // Cap at 50%
         
         pendingParameterUpdates["largeMoveThreshold"] = newThreshold;
-        parameterUpdateTimestamps["largeMoveThreshold"] = block.number + parameterUpdateTimelock;
+        parameterUpdateTimestamps["largeMoveThreshold"] = block.timestamp + parameterUpdateTimelock;
         
-        emit ParameterUpdateScheduled("largeMoveThreshold", largeMoveThreshold, newThreshold, block.number + parameterUpdateTimelock);
+        emit ParameterUpdateScheduled("largeMoveThreshold", largeMoveThreshold, newThreshold, block.timestamp + parameterUpdateTimelock);
     }
 
     function applyPendingUpdates() external onlyRole(GOVERNOR_ROLE) {
-        if (parameterUpdateTimestamps["slippageTolerance"] != 0 && parameterUpdateTimestamps["slippageTolerance"] <= block.number) {
+        if (parameterUpdateTimestamps["slippageTolerance"] != 0 && parameterUpdateTimestamps["slippageTolerance"] <= block.timestamp) {
             uint256 oldValue = slippageTolerance;
             slippageTolerance = pendingParameterUpdates["slippageTolerance"];
-            emit ParameterUpdated("slippageTolerance", oldValue, slippageTolerance, block.number);
+            emit ParameterUpdated("slippageTolerance", oldValue, slippageTolerance, block.timestamp);
             delete pendingParameterUpdates["slippageTolerance"];
             delete parameterUpdateTimestamps["slippageTolerance"];
         }
         
-        if (parameterUpdateTimestamps["timelockDuration"] != 0 && parameterUpdateTimestamps["timelockDuration"] <= block.number) {
+        if (parameterUpdateTimestamps["timelockDuration"] != 0 && parameterUpdateTimestamps["timelockDuration"] <= block.timestamp) {
             uint256 oldValue = timelockDuration;
             timelockDuration = pendingParameterUpdates["timelockDuration"];
-            emit ParameterUpdated("timelockDuration", oldValue, timelockDuration, block.number);
+            emit ParameterUpdated("timelockDuration", oldValue, timelockDuration, block.timestamp);
             delete pendingParameterUpdates["timelockDuration"];
             delete parameterUpdateTimestamps["timelockDuration"];
         }
         
-        if (parameterUpdateTimestamps["apyThreshold"] != 0 && parameterUpdateTimestamps["apyThreshold"] <= block.number) {
+        if (parameterUpdateTimestamps["apyThreshold"] != 0 && parameterUpdateTimestamps["apyThreshold"] <= block.timestamp) {
             uint256 oldValue = apyThreshold;
             apyThreshold = pendingParameterUpdates["apyThreshold"];
-            emit ParameterUpdated("apyThreshold", oldValue, apyThreshold, block.number);
+            emit ParameterUpdated("apyThreshold", oldValue, apyThreshold, block.timestamp);
             delete pendingParameterUpdates["apyThreshold"];
             delete parameterUpdateTimestamps["apyThreshold"];
         }
         
-        if (parameterUpdateTimestamps["largeMoveThreshold"] != 0 && parameterUpdateTimestamps["largeMoveThreshold"] <= block.number) {
+        if (parameterUpdateTimestamps["largeMoveThreshold"] != 0 && parameterUpdateTimestamps["largeMoveThreshold"] <= block.timestamp) {
             uint256 oldValue = largeMoveThreshold;
             largeMoveThreshold = pendingParameterUpdates["largeMoveThreshold"];
-            emit ParameterUpdated("largeMoveThreshold", oldValue, largeMoveThreshold, block.number);
+            emit ParameterUpdated("largeMoveThreshold", oldValue, largeMoveThreshold, block.timestamp);
             delete pendingParameterUpdates["largeMoveThreshold"];
             delete parameterUpdateTimestamps["largeMoveThreshold"];
         }

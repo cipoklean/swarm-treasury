@@ -35,6 +35,7 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         bool cancelled;
         bool yieldScoutApproved;
         bool riskGuardApproved;
+        uint256 approvedAtBlock; // block when final approval landed (for execution delay)
     }
 
     struct AssetLimit {
@@ -72,7 +73,7 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
 
     uint256 public proposalThreshold = 1;
     uint256 public votingDelay = 1;
-    uint256 public votingPeriod = 10;
+    uint256 public votingPeriod = 200; // ~150s on BOT Chain (0.75s blocks)
     uint256 public quorum = 1;
 
     address[] public whitelistedAssets;
@@ -92,12 +93,18 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
     uint256 public constant MIN_TIMELOCK_BLOCKS = 2;
     uint256 public constant MAX_SLIPPAGE_BPS = 50;
     uint256 public constant LARGE_MOVE_THRESHOLD_BPS = 2000;
+    uint256 public constant EXECUTION_DELAY = 100; // ~75s on BOT Chain (0.75s blocks)
+    uint256 public constant MAX_SINGLE_MOVE_BPS = 2000; // 20% of treasury per action
+    uint256 public constant CIRCUIT_BREAKER_THRESHOLD = 3; // consecutive vetoes before auto-pause
+
+    uint256 public consecutiveVetoes;
 
     event YieldScoutApproved(uint256 indexed proposalId, address indexed agent);
     event RiskGuardApproved(uint256 indexed proposalId, address indexed agent);
     event AgentRegistrySet(address indexed registry);
     event MessageBusSet(address indexed messageBus);
     event WithdrawalTimelockSet(uint256 blocks);
+    event CircuitBreakerTriggered(uint256 consecutiveVetoes, address triggeredBy);
 
     function initialize(
         address _treasurer,
@@ -149,8 +156,14 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         Proposal storage proposal = _proposals[proposalId];
         require(!proposal.executed, "Already executed");
         require(!proposal.cancelled, "Cancelled");
+        require(block.number <= proposal.deadline, "Proposal expired");
         require(proposal.yieldScoutApproved, "Yield Scout not approved");
         require(proposal.riskGuardApproved, "Risk Guard not approved");
+        require(proposal.forVotes >= quorum, "Quorum not met");
+        require(
+            proposal.approvedAtBlock > 0 && block.number >= proposal.approvedAtBlock + EXECUTION_DELAY,
+            "Execution delay not elapsed"
+        );
 
         proposal.executed = true;
 
@@ -194,7 +207,8 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
             executed: false,
             cancelled: false,
             yieldScoutApproved: true,
-            riskGuardApproved: false
+            riskGuardApproved: false,
+            approvedAtBlock: 0
         });
 
         emit ProposalCreated(proposalCount, msg.sender, target, value, data, _proposals[proposalCount].deadline);
@@ -216,6 +230,11 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         if (agentRegistry.hasRole(RISK_GUARD_ROLE, msg.sender)) {
             require(!proposal.riskGuardApproved, "Already approved by Risk Guard");
             proposal.riskGuardApproved = true;
+            // Record when the final approval landed — execution delay starts here
+            if (proposal.yieldScoutApproved) {
+                proposal.approvedAtBlock = block.number;
+            }
+            consecutiveVetoes = 0; // reset circuit breaker on approval
             emit RiskGuardApproved(proposalId, msg.sender);
 
             messageBus.postMessage(
@@ -228,6 +247,10 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         } else if (agentRegistry.hasRole(YIELD_SCOUT_ROLE, msg.sender)) {
             require(!proposal.yieldScoutApproved, "Already approved by Yield Scout");
             proposal.yieldScoutApproved = true;
+            // If risk guard already approved, record the approval block now
+            if (proposal.riskGuardApproved) {
+                proposal.approvedAtBlock = block.number;
+            }
             emit YieldScoutApproved(proposalId, msg.sender);
 
             messageBus.postMessage(
@@ -249,7 +272,14 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         require(block.number < proposal.deadline, "Voting ended");
 
         proposal.cancelled = true;
+        consecutiveVetoes++;
         emit ProposalCancelled(proposalId);
+
+        // Circuit breaker: auto-pause after too many consecutive vetoes
+        if (consecutiveVetoes >= CIRCUIT_BREAKER_THRESHOLD) {
+            _pause();
+            emit CircuitBreakerTriggered(consecutiveVetoes, msg.sender);
+        }
 
         messageBus.postMessage(
             proposalId,
@@ -338,16 +368,15 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         }
 
         treasuryBalance[asset] -= amount;
-
-        (bool success, ) = asset.call{value: 0}(abi.encodeWithSelector(IERC20(asset).transfer.selector, to, amount));
-        require(success, "Transfer failed");
+        IERC20(asset).safeTransfer(to, amount);
 
         emit TreasuryWithdrawal(asset, amount, to);
     }
 
     function emergencyWithdraw(address asset, uint256 amount, address to) external nonReentrant onlyRole(GOVERNOR_ROLE) {
         require(amount > 0, "Amount must be > 0");
-        require(assetWhitelist[asset] || treasuryBalance[asset] >= amount, "Insufficient balance");
+        require(to != address(0), "Invalid recipient");
+        require(treasuryBalance[asset] >= amount, "Insufficient balance");
 
         treasuryBalance[asset] -= amount;
         IERC20(asset).safeTransfer(to, amount);
@@ -434,6 +463,10 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         require(config.active, "Strategy not active");
         require(config.currentAllocation + amount <= config.maxAllocation, "Exceeds max allocation");
         require(treasuryBalance[config.asset] >= amount, "Insufficient treasury balance");
+        require(
+            amount * 10000 <= treasuryBalance[config.asset] * MAX_SINGLE_MOVE_BPS,
+            "Exceeds single-move cap"
+        );
 
         treasuryBalance[config.asset] -= amount;
         config.currentAllocation += amount;

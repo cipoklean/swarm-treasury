@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
   --bg-deep: #06080d;
@@ -29,19 +29,23 @@
   --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 4px 24px rgba(0,0,0,0.3);
   --shadow-glow-blue: 0 0 20px rgba(88,166,255,0.15);
   --shadow-glow-green: 0 0 20px rgba(63,185,80,0.15);
+
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-body);
   background: var(--bg-deep);
   color: var(--text-primary);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Animated background */
+/* Layered ambient background — subtle grid + radial glows over the deep base */
 body::before {
   content: '';
   position: fixed;
@@ -54,24 +58,19 @@ body::before {
   z-index: 0;
 }
 
-/* Floating orbs */
+/* Faint command-center grid overlay */
 body::after {
   content: '';
   position: fixed;
-  width: 600px; height: 600px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(88,166,255,0.06) 0%, transparent 70%);
-  top: -200px; left: -100px;
-  filter: blur(60px);
-  animation: float1 20s ease-in-out infinite;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(88,166,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(88,166,255,0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 30%, black 0%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 30%, black 0%, transparent 80%);
   pointer-events: none;
   z-index: 0;
-}
-
-@keyframes float1 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(200px, 100px) scale(1.1); }
-  66% { transform: translate(-50px, 200px) scale(0.9); }
 }
 
 #root {
@@ -86,12 +85,35 @@ body::after {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 /* Utility */
-.mono { font-family: 'JetBrains Mono', monospace; }
+.mono { font-family: var(--font-mono); }
+.display { font-family: var(--font-display); }
 .glass {
   background: rgba(22,27,34,0.85);
   backdrop-filter: blur(20px);
   border: 1px solid var(--border-default);
 }
+
+/* Data-stream shimmer for live pipeline connectors */
+@keyframes streamPulse {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+.stream-line {
+  background: linear-gradient(90deg,
+    var(--border-glow) 0%,
+    var(--accent-cyan) 45%,
+    var(--accent-blue) 55%,
+    var(--border-glow) 100%);
+  background-size: 200% 100%;
+  animation: streamPulse 2.4s linear infinite;
+}
+
+/* Soft blink for LIVE indicators */
+@keyframes liveBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.live-blink { animation: liveBlink 1.6s ease-in-out infinite; }
 
 .chart-tooltip {
   background: var(--bg-elevated) !important;

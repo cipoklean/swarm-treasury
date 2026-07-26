@@ -131,13 +131,22 @@ const statusStyle: Record<string, { color:string; bg:string }> = {
 export const TransactionLog: React.FC<{ transactions: Transaction[] }> = ({ transactions }) => (
   <div style={cardStyle()}>
     <div style={headingStyle}>
-      <span style={{ color:C.blue, fontSize:'1rem' }}>⊞</span> TRANSACTION LOG
+      <span style={{ color:C.blue, fontSize:'1rem' }}>⊞</span> EVENT LOG
+      <span style={{ marginLeft:'auto', fontFamily:'JetBrains Mono, monospace', fontSize:'0.68rem', color:C.muted }}>
+        {transactions.length} events
+      </span>
     </div>
+    {transactions.length === 0 ? (
+      <div style={{ textAlign:'center', padding:'40px 0', color:C.muted }}>
+        <div style={{ fontSize:'1.8rem', marginBottom:'8px' }}>⊘</div>
+        <div style={{ fontSize:'0.82rem' }}>No on-chain events yet — waiting for the swarm…</div>
+      </div>
+    ) : (
     <div style={{ overflowX:'auto' }}>
       <table style={{ width:'100%', borderCollapse:'collapse' }}>
         <thead>
           <tr style={{ borderBottom:`1px solid ${C.border}` }}>
-            {['TX HASH','ACTION','AMOUNT','BLOCK','TIME','STATUS'].map(h=>(
+            {['DATA HASH','ACTION','BLOCK','TIME','STATUS'].map(h=>(
               <th key={h} style={{ textAlign:'left', padding:'8px 12px', fontSize:'0.6rem', fontWeight:600, color:C.muted, textTransform:'uppercase', letterSpacing:'1.5px' }}>
                 {h}
               </th>
@@ -146,20 +155,17 @@ export const TransactionLog: React.FC<{ transactions: Transaction[] }> = ({ tran
         </thead>
         <tbody>
           {transactions.map((tx,i)=>(
-            <motion.tr key={tx.txHash} initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} transition={{delay:i*0.05}}
+            <motion.tr key={`${tx.txHash}-${i}`} initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} transition={{delay:i*0.04}}
               style={{ borderBottom:`1px solid ${C.border}` }}>
-              <td style={{ padding:'10px 12px', fontFamily:'JetBrains Mono, monospace', fontSize:'0.78rem', color:C.blue }}>
-                {tx.txHash.slice(0,6)}...{tx.txHash.slice(-4)}
+              <td style={{ padding:'10px 12px', fontFamily:'JetBrains Mono, monospace', fontSize:'0.76rem', color:C.blue }}>
+                {tx.txHash.slice(0,10)}…
               </td>
               <td style={{ padding:'10px 12px', fontSize:'0.8rem', color:C.text }}>{tx.action}</td>
-              <td style={{ padding:'10px 12px', fontFamily:'JetBrains Mono, monospace', fontSize:'0.78rem', color:C.text }}>
-                ${tx.amount.toLocaleString()}
-              </td>
-              <td style={{ padding:'10px 12px', fontFamily:'JetBrains Mono, monospace', fontSize:'0.78rem', color:C.secondary }}>
+              <td style={{ padding:'10px 12px', fontFamily:'JetBrains Mono, monospace', fontSize:'0.76rem', color:C.secondary }}>
                 {tx.block.toLocaleString()}
               </td>
-              <td style={{ padding:'10px 12px', fontSize:'0.75rem', color:C.secondary }}>
-                {new Date(tx.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+              <td style={{ padding:'10px 12px', fontSize:'0.74rem', color:C.secondary }}>
+                {new Date(tx.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
               </td>
               <td style={{ padding:'10px 12px' }}>
                 <span style={{
@@ -176,6 +182,7 @@ export const TransactionLog: React.FC<{ transactions: Transaction[] }> = ({ tran
         </tbody>
       </table>
     </div>
+    )}
   </div>
 );
 

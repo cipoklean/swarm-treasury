@@ -1,37 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ethers } from 'ethers';
-import { C } from '../theme';
+import { C, FONT } from '../theme';
 import { useWallet } from '../wallet';
 import { ADDRESSES, RPC_URL } from '../deployment';
 import { ABIS } from '../abis.generated';
+import { useControlState } from '../hooks/useControlState';
 
 const GREEN = '#3fb950';
 const AMBER = '#d29922';
 const RED = '#f85149';
 
-type Ctrl = { paused: boolean; stop: boolean };
-
 const ControlPanel: React.FC = () => {
   const { address, signer, connect, connecting } = useWallet();
-  const [state, setState] = useState<Ctrl>({ paused: false, stop: false });
+  const { state, send } = useControlState();
   const [busy, setBusy] = useState(false);
   const [isGovernor, setIsGovernor] = useState<boolean | null>(null);
   const [govMsg, setGovMsg] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const r = await fetch('/control');
-      if (r.ok) setState(await r.json());
-    } catch {
-      /* server not running */
-    }
-  }, []);
-  useEffect(() => {
-    refresh();
-    const i = setInterval(refresh, 3000);
-    return () => clearInterval(i);
-  }, [refresh]);
 
   // Is the connected wallet the governor/owner? (read-only call)
   useEffect(() => {
@@ -55,18 +40,9 @@ const ControlPanel: React.FC = () => {
     };
   }, [address]);
 
-  const send = async (action: string) => {
+  const act = async (action: string) => {
     setBusy(true);
-    try {
-      const r = await fetch('/control', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action }),
-      });
-      if (r.ok) setState(await r.json());
-    } catch {
-      /* ignore */
-    }
+    await send(action);
     setBusy(false);
   };
 
@@ -102,7 +78,10 @@ const ControlPanel: React.FC = () => {
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-        <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: C.text, letterSpacing: '0.3px' }}>
+        <h3 style={{
+          margin: 0, fontFamily: FONT.display, fontSize: '0.95rem', fontWeight: 700,
+          color: C.text, letterSpacing: '0.5px',
+        }}>
           Bot Control
         </h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -111,7 +90,7 @@ const ControlPanel: React.FC = () => {
             transition={{ duration: 2, repeat: Infinity }}
             style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 10px ${color}66` }}
           />
-          <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.75rem', fontWeight: 600, color }}>
+          <span style={{ fontFamily: FONT.mono, fontSize: '0.75rem', fontWeight: 600, color }}>
             {status}
           </span>
         </div>
@@ -124,23 +103,23 @@ const ControlPanel: React.FC = () => {
       )}
 
       {address && isGovernor === false && (
-        <div style={{ fontSize: '0.72rem', color: C.muted, fontFamily: 'JetBrains Mono, monospace' }}>
+        <div style={{ fontSize: '0.72rem', color: C.muted, fontFamily: FONT.mono }}>
           Connected · not governor (read-only)
         </div>
       )}
 
       {address && isGovernor && (
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button onClick={() => send('start')} disabled={busy} style={btn(GREEN)}>▶ Resume</button>
-          <button onClick={() => send('pause')} disabled={busy} style={btn(AMBER)}>⏸ Pause</button>
-          <button onClick={() => send('stop')} disabled={busy} style={btn(RED)}>⏹ Stop</button>
-          <button onClick={() => send('reset')} disabled={busy} style={btnSecondary()}>↺ Reset</button>
+          <button onClick={() => act('start')} disabled={busy} style={btn(GREEN)}>▶ Resume</button>
+          <button onClick={() => act('pause')} disabled={busy} style={btn(AMBER)}>⏸ Pause</button>
+          <button onClick={() => act('stop')} disabled={busy} style={btn(RED)}>⏹ Stop</button>
+          <button onClick={() => act('reset')} disabled={busy} style={btnSecondary()}>↺ Reset</button>
           <button onClick={emergency} disabled={busy} style={btn(RED)}>⚠ Emergency Pause (chain)</button>
         </div>
       )}
 
       {govMsg && (
-        <p style={{ margin: '10px 0 0', fontSize: '0.66rem', color: C.muted, fontFamily: 'JetBrains Mono, monospace' }}>
+        <p style={{ margin: '10px 0 0', fontSize: '0.66rem', color: C.muted, fontFamily: FONT.mono }}>
           {govMsg}
         </p>
       )}

@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import time
 from typing import Dict, Any, List, Optional
 
@@ -72,8 +73,8 @@ class Executor:
             # Vote YES first to ensure quorum
             try:
                 await self.client.send_transaction(self.treasury_vault, 'vote', [action.proposal_id, True], self.private_key)
-            except:
-                pass
+            except Exception as vote_err:
+                logger.debug(f"Vote skipped for proposal {action.proposal_id}: {vote_err}")
 
             tx_result = await self.client.send_transaction(self.treasury_vault, 'executeProposal', [action.proposal_id], self.private_key)
 
@@ -113,6 +114,14 @@ class Executor:
     async def run(self) -> None:
         logger.info("Executor agent started")
         self.control = ControlState()
+
+        # Graceful shutdown on SIGTERM (Docker/Render) and SIGINT (Ctrl+C)
+        def _shutdown(signum, frame):
+            logger.info(f"Received signal {signum} — requesting stop")
+            self.control.stop()
+        signal.signal(signal.SIGTERM, _shutdown)
+        signal.signal(signal.SIGINT, _shutdown)
+
         while True:
             try:
                 # --- bot control plane ---

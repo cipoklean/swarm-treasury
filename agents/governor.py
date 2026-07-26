@@ -8,13 +8,13 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import time
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
 from botchain_client import get_botchain_client
 from control_state import ControlState
-from plyer import notification
 
 # Configure logging
 logging.basicConfig(
@@ -157,55 +157,41 @@ class Governor:
     
     def _is_large_move(self, proposal: tuple) -> bool:
         """
-        Check if a proposal represents a large move
-        
-        Args:
-            proposal: Proposal data tuple
-            
-        Returns:
-            True if this is a large move
+        Check if a proposal represents a large move by decoding the calldata
+        and comparing the amount against the treasury balance.
         """
         try:
-            # Get treasury balance for the asset
-            target = proposal[1]  # target address
-            value = proposal[2]  # value
-            
-            # For strategy deposits, check against treasury balance
-            if 'depositToStrategy' in str(proposal[3]):
-                # Decode to get asset and amount
-                try:
-                    decoded = self.treasury_vault.decode_function_input(proposal[3])
-                    asset = decoded[0]  # strategyAddress (first decoded arg)
-                    amount = decoded[1]  # amount (second decoded arg)
-                    
-                    # Get asset from strategy config
-                    strategy_config = self.treasury_vault.functions.strategyConfig(target).call()
-                    asset = strategy_config[0]
-                    
-                    treasury_balance = self.treasury_vault.functions.treasuryBalance(asset).call()
-                    
-                    if treasury_balance > 0:
-                        return (amount * 100) / treasury_balance >= (self.large_move_threshold * 100)
-                except:
-                    pass
-            
-            # For withdrawals, check against treasury balance
-            if 'withdraw' in str(proposal[3]):
-                try:
-                    decoded = self.treasury_vault.decode_function_input(proposal[3])
-                    asset = decoded[0]['args'][0]
-                    amount = decoded[0]['args'][1]
-                    
-                    treasury_balance = self.treasury_vault.functions.treasuryBalance(asset).call()
-                    
-                    if treasury_balance > 0:
-                        return (amount * 100) / treasury_balance >= (self.large_move_threshold * 100)
-                except:
-                    pass
-            
+            target = proposal[1]   # target address
+            data = proposal[3]     # calldata bytes
+
+            # Decode the function call from calldata
+            try:
+                func, params = self.treasury_vault.decode_function_input(data)
+            except Exception:
+                return False
+
+            func_name = func.fn_name if hasattr(func, 'fn_name') else ''
+
+            if func_name == 'depositToStrategy':
+                strategy_address = params.get('strategy', params.get('strategyAddress'))
+                amount = params.get('amount', 0)
+                # Get asset from strategy config
+                strategy_config = self.treasury_vault.functions.strategyConfig(strategy_address).call()
+                asset = strategy_config[0]
+                treasury_balance = self.treasury_vault.functions.treasuryBalance(asset).call()
+                if treasury_balance > 0:
+                    return (amount * 100) / treasury_balance >= (self.large_move_threshold * 100)
+
+            elif func_name == 'withdraw':
+                asset = params.get('asset')
+                amount = params.get('amount', 0)
+                treasury_balance = self.treasury_vault.functions.treasuryBalance(asset).call()
+                if treasury_balance > 0:
+                    return (amount * 100) / treasury_balance >= (self.large_move_threshold * 100)
+
         except Exception as e:
             logger.error(f"Error checking large move: {e}")
-        
+
         return False
     
     async def request_approval(self, approval: PendingApproval) -> bool:
@@ -268,8 +254,9 @@ class Governor:
             return False
     
     def _send_notification(self, approval: PendingApproval) -> None:
-        """Send desktop notification"""
+        """Send desktop notification (best-effort, skipped on headless servers)"""
         try:
+            from plyer import notification
             title = "Swarm Treasury - Approval Required"
             message = f"Proposal {approval.proposal_id}: Invest {approval.amount / 10**18} {approval.asset} at {approval.expected_apy / 100}% APY"
             
@@ -349,13 +336,17 @@ class Governor:
             
             logger.info("Emergency pause triggered across all contracts")
             
-            # Send notification
-            notification.notify(
-                title="Swarm Treasury - EMERGENCY PAUSE",
-                message="All contracts have been paused by Governor",
-                app_name="Swarm Treasury",
-                timeout=10
-            )
+            # Send notification (best-effort)
+            try:
+                from plyer import notification
+                notification.notify(
+                    title="Swarm Treasury - EMERGENCY PAUSE",
+                    message="All contracts have been paused by Governor",
+                    app_name="Swarm Treasury",
+                    timeout=10
+                )
+            except Exception:
+                pass
             
         except Exception as e:
             logger.error(f"Failed to trigger emergency pause: {e}")
@@ -407,6 +398,13 @@ class Governor:
         """Main agent loop"""
         logger.info("Governor agent started")
         self.control = ControlState()
+
+        # Graceful shutdown on SIGTERM (Docker/Render) and SIGINT (Ctrl+C)
+        def _shutdown(signum, frame):
+            logger.info(f"Received signal {signum} — requesting stop")
+            self.control.stop()
+        signal.signal(signal.SIGTERM, _shutdown)
+        signal.signal(signal.SIGINT, _shutdown)
 
         while True:
             try:

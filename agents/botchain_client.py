@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
@@ -40,6 +41,30 @@ class ContractConfig:
     abi: Dict[str, Any]
 
 
+class NonceManager:
+    """Thread-safe per-address nonce manager to prevent collisions
+    when multiple transactions are sent from the same key."""
+
+    def __init__(self, w3: Web3):
+        self._w3 = w3
+        self._nonces: Dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def get_nonce(self, address: str) -> int:
+        """Allocate the next nonce for an address, fetching from chain on first use."""
+        with self._lock:
+            if address not in self._nonces:
+                self._nonces[address] = self._w3.eth.get_transaction_count(address, 'pending')
+            nonce = self._nonces[address]
+            self._nonces[address] = nonce + 1
+            return nonce
+
+    def reset(self, address: str) -> None:
+        """Reset nonce cache for an address (e.g. after a failed tx)."""
+        with self._lock:
+            self._nonces.pop(address, None)
+
+
 class BotChainClient:
     """
     Async BOT Chain client with event polling and transaction support
@@ -51,7 +76,7 @@ class BotChainClient:
         
         Args:
             rpc_url: BOT Chain RPC URL
-            chain_id: Chain ID (968 for BOT Chain — matches config.json / chainConfig.ts)
+            chain_id: Chain ID (968 for BOT Chain testnet — matches config.json / chainConfig.ts)
         """
         self.rpc_url = rpc_url
         self.chain_id = chain_id
@@ -67,6 +92,9 @@ class BotChainClient:
         
         # Event filters
         self._event_filters: Dict[str, Any] = {}
+
+        # Nonce manager
+        self._nonce_mgr = NonceManager(self.w3)
         
         logger.info(f"Initialized BOT Chain client for chain {chain_id}")
         logger.info(f"RPC URL: {rpc_url}")
@@ -82,7 +110,7 @@ class BotChainClient:
     async def get_latest_block(self) -> Dict[str, Any]:
         """Get latest block information"""
         try:
-            block = self.w3.eth.get_block('latest')
+            block = await asyncio.to_thread(self.w3.eth.get_block, 'latest')
             return {
                 'number': block.get('number', getattr(block, 'number', 0)),
                 'hash': (block.get('hash', getattr(block, 'hash', b'')) or b'').hex(),
@@ -119,7 +147,7 @@ class BotChainClient:
                 if current_block_number > last_block_number:
                     # New block(s) found
                     for block_num in range(last_block_number + 1, current_block_number + 1):
-                        block_data = self.w3.eth.get_block(block_num)
+                        block_data = await asyncio.to_thread(self.w3.eth.get_block, block_num)
                         callback(block_data)
                     
                     last_block_number = current_block_number
@@ -156,6 +184,44 @@ class BotChainClient:
         """Get cached contract by name"""
         return self._contracts.get(name)
     
+    def _send_transaction_sync(
+        self,
+        contract: Contract,
+        function_name: str,
+        args: List[Any],
+        private_key: str,
+        gas_limit: Optional[int],
+        value: int,
+    ) -> Dict[str, Any]:
+        """Synchronous transaction build-sign-send-wait (runs in a thread)."""
+        sender = self.w3.eth.account.from_key(private_key).address
+        func = contract.get_function_by_name(function_name)
+
+        tx = func(*args).build_transaction({
+            'from': sender,
+            'gas': gas_limit or 2000000,
+            'gasPrice': self.w3.eth.gas_price,
+            'nonce': self._nonce_mgr.get_nonce(sender),
+            'value': value,
+            'chainId': self.chain_id,
+        })
+
+        signed_tx = self.w3.eth.account.sign_transaction(tx, private_key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        receipt_raw = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        receipt = dict(receipt_raw)
+
+        logger.info(f"Transaction sent: {tx_hash.hex()}")
+        logger.info(f"Gas used: {receipt.get('gasUsed', receipt.get('gas_used', 0))}")
+
+        return {
+            'tx_hash': tx_hash.hex(),
+            'receipt': receipt,
+            'block_number': receipt.get('blockNumber', receipt.get('block_number', 0)),
+            'block_hash': (receipt.get('blockHash') or receipt.get('block_hash') or b'').hex(),
+            'gas_used': receipt.get('gasUsed', receipt.get('gas_used', 0)),
+        }
+
     async def send_transaction(
         self, 
         contract: Contract, 
@@ -166,60 +232,23 @@ class BotChainClient:
         value: int = 0
     ) -> Dict[str, Any]:
         """
-        Send a transaction to a contract
-        
-        Args:
-            contract: Contract instance
-            function_name: Function name to call
-            args: Function arguments
-            private_key: Private key for signing
-            gas_limit: Gas limit
-            value: Value in wei
-            
-        Returns:
-            Transaction receipt
+        Send a transaction to a contract (non-blocking).
+
+        The synchronous web3 calls run in a thread via asyncio.to_thread
+        so the event loop is never blocked.
         """
         if args is None:
             args = []
-        
         try:
-            # Get function
-            func = contract.get_function_by_name(function_name)
-            
-            # Build transaction
-            tx = func(*args).build_transaction({
-                'from': self.w3.eth.account.from_key(private_key).address,
-                'gas': gas_limit or 2000000,
-                'gasPrice': self.w3.eth.gas_price,
-                'nonce': self.w3.eth.get_transaction_count(
-                    self.w3.eth.account.from_key(private_key).address
-                ),
-                'value': value,
-                'chainId': self.chain_id
-            })
-            
-            # Sign transaction
-            signed_tx = self.w3.eth.account.sign_transaction(tx, private_key)
-            
-            # Send transaction
-            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-            
-            # Wait for receipt
-            receipt_raw = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-            receipt = dict(receipt_raw)
-            
-            logger.info(f"Transaction sent: {tx_hash.hex()}")
-            logger.info(f"Gas used: {receipt.get('gasUsed', receipt.get('gas_used', 0))}")
-            
-            return {
-                'tx_hash': tx_hash.hex(),
-                'receipt': receipt,
-                'block_number': receipt.get('blockNumber', receipt.get('block_number', 0)),
-                'block_hash': (receipt.get('blockHash') or receipt.get('block_hash') or b'').hex(),
-                'gas_used': receipt.get('gasUsed', receipt.get('gas_used', 0))
-            }
-            
+            return await asyncio.to_thread(
+                self._send_transaction_sync,
+                contract, function_name, args, private_key, gas_limit, value,
+            )
         except Exception as e:
+            # Reset nonce cache on failure so the next attempt re-fetches
+            if private_key:
+                sender = self.w3.eth.account.from_key(private_key).address
+                self._nonce_mgr.reset(sender)
             logger.error(f"Transaction failed: {e}")
             raise
     
@@ -325,10 +354,10 @@ class BotChainClient:
                         }
                     ]
                 )
-                return token_contract.functions.balanceOf(address).call()
+                return await asyncio.to_thread(token_contract.functions.balanceOf(address).call)
             else:
                 # Native token balance
-                return self.w3.eth.get_balance(address)
+                return await asyncio.to_thread(self.w3.eth.get_balance, address)
                 
         except Exception as e:
             logger.error(f"Failed to get balance for {address}: {e}")
@@ -344,7 +373,7 @@ def get_botchain_client() -> BotChainClient:
     global _botchain_client
     
     if _botchain_client is None:
-        rpc_url = os.getenv('BOT_CHAIN_RPC_URL', 'https://bot-chain-rpc.url')
+        rpc_url = os.getenv('BOT_CHAIN_RPC_URL', 'https://rpc.bohr.life')
         chain_id = int(os.getenv('BOT_CHAIN_ID', '968'))
         _botchain_client = BotChainClient(rpc_url, chain_id)
     

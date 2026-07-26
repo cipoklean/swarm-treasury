@@ -33,7 +33,7 @@ contract MessageBus is Initializable, OwnableUpgradeable, IMessageBus {
         bytes32 dataHash
     ) external override returns (uint256) {
         require(agentRole >= 1 && agentRole <= 4, "Invalid agent role");
-        require(messageType >= 0 && messageType <= 2, "Invalid message type");
+        require(messageType <= 2, "Invalid message type");
         if (agentRegistry != address(0)) {
             require(IAgentRegistry(agentRegistry).isAgent(msg.sender), "Not a registered agent");
         }
@@ -92,7 +92,7 @@ contract MessageBus is Initializable, OwnableUpgradeable, IMessageBus {
         return messageExistsMap[messageId];
     }
 
-    function checkExpiry(uint256 messageId) external returns (bool) {
+    function checkExpiry(uint256 messageId) external onlyOwner returns (bool) {
         Message memory messageData = messages[messageId];
         if (block.number > messageData.blockNumber + MESSAGE_EXPIRY_BLOCKS) {
             messageExistsMap[messageId] = false;

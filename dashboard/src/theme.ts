@@ -1,5 +1,5 @@
 // Swarm Treasury — Design System
-// Single source of truth for colors, used across all components
+// Single source of truth for colors + type, used across all components
 
 export const C = {
   bg:        '#06080d',
@@ -21,6 +21,13 @@ export const C = {
 
   border:    '#21262d',
   glow:      '#30363d',
+} as const;
+
+// Type scale — Space Grotesk for display, Inter for body, JetBrains Mono for data
+export const FONT = {
+  display: `'Space Grotesk', 'Inter', system-ui, sans-serif`,
+  body:    `'Inter', system-ui, -apple-system, sans-serif`,
+  mono:    `'JetBrains Mono', ui-monospace, monospace`,
 } as const;
 
 export const ROLE_COLORS: Record<string, string> = {
@@ -47,7 +54,8 @@ export const cardStyle = (extra?: Record<string, string | number>) => ({
 });
 
 export const headingStyle = {
-  fontSize: '0.8rem',
+  fontFamily: FONT.display,
+  fontSize: '0.78rem',
   fontWeight: 600,
   color: C.secondary,
   textTransform: 'uppercase' as const,

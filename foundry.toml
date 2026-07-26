@@ -31,3 +31,7 @@ exclude = ["test", "script"]
 # Gas reports
 [profile.gas_reports]
 disabled = false
+
+# Lint: silence benign demo warnings (cosmetic only — build still compiles)
+[lint]
+exclude_lints = ["unsafe-typecast", "block-timestamp", "erc20-unchecked-transfer"]

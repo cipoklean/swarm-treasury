@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import time
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -138,12 +139,12 @@ class RiskGuard:
             proposal = self.treasury_vault.functions.proposals(proposal_id).call()
             
             # Decode the proposal data to get strategy and amount
-            # The data should be encoded call to depositToStrategy
+            # decode_function_input returns (ContractFunction, params_dict)
             try:
-                decoded = self.treasury_vault.decode_function_input(proposal[3])  # data
-                strategy_address = decoded[0]
-                amount = decoded[1]
-            except:
+                func, params = self.treasury_vault.decode_function_input(proposal[3])  # data
+                strategy_address = params.get('strategy', params.get('strategyAddress'))
+                amount = params.get('amount', 0)
+            except Exception:
                 # Fallback - use target as strategy
                 strategy_address = proposal[1]  # target
                 amount = proposal[2]  # value
@@ -294,6 +295,13 @@ class RiskGuard:
         """Main agent loop"""
         logger.info("Risk Guard agent started")
         self.control = ControlState()
+
+        # Graceful shutdown on SIGTERM (Docker/Render) and SIGINT (Ctrl+C)
+        def _shutdown(signum, frame):
+            logger.info(f"Received signal {signum} — requesting stop")
+            self.control.stop()
+        signal.signal(signal.SIGTERM, _shutdown)
+        signal.signal(signal.SIGINT, _shutdown)
 
         while True:
             try:

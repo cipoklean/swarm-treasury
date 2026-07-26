@@ -68,8 +68,8 @@ contract GovernorTest is Test {
         gov.setSlippageTolerance(100);
         assertEq(gov.getSlippageTolerance(), 50); // not applied yet
 
-        // warp past timelock
-        vm.roll(block.number + 25);
+        // warp past 24h timelock
+        vm.warp(block.timestamp + 24 hours + 1);
         gov.applyPendingUpdates();
         assertEq(gov.getSlippageTolerance(), 100);
     }
@@ -84,7 +84,7 @@ contract GovernorTest is Test {
         vm.prank(address(this));
         gov.setTimelockDuration(48);
 
-        vm.roll(block.number + 25);
+        vm.warp(block.timestamp + 24 hours + 1);
         gov.applyPendingUpdates();
         assertEq(gov.getTimelockDuration(), 48);
     }
@@ -99,7 +99,7 @@ contract GovernorTest is Test {
         vm.prank(address(this));
         gov.setAPYThreshold(500); // 5%
 
-        vm.roll(block.number + 25);
+        vm.warp(block.timestamp + 24 hours + 1);
         gov.applyPendingUpdates();
         assertEq(gov.getAPYThreshold(), 500);
     }
@@ -114,7 +114,7 @@ contract GovernorTest is Test {
         vm.prank(address(this));
         gov.setLargeMoveThreshold(3000); // 30%
 
-        vm.roll(block.number + 25);
+        vm.warp(block.timestamp + 24 hours + 1);
         gov.applyPendingUpdates();
         assertEq(gov.getLargeMoveThreshold(), 3000);
     }
@@ -133,7 +133,7 @@ contract GovernorTest is Test {
         gov.setAPYThreshold(800);
         vm.stopPrank();
 
-        vm.roll(block.number + 30);
+        vm.warp(block.timestamp + 24 hours + 1);
         gov.applyPendingUpdates();
 
         assertEq(gov.getSlippageTolerance(), 80);

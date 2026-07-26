@@ -38,3 +38,8 @@ logs/
 
 # Foundry artifacts
 *.sol.json
+
+BOTCHAIN_PITCH.md
+YIELD_ADAPTER.md
+generate_pdf_reportlab.py
+pitch
