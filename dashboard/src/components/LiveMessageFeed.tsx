@@ -10,8 +10,20 @@ interface Message {
 }
 
 const LiveMessageFeed: React.FC<{ messages: Message[]; isLoading: boolean }> = ({ messages, isLoading }) => {
-  const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
+
+  // Stick-to-bottom: only auto-scroll the feed container itself (never the page).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [messages]);
 
   const agentNames: Record<number, string> = { 1:'Yield Scout', 2:'Risk Guard', 3:'Executor', 4:'Governor' };
   const typeBadge: Record<string, { color: string; bg: string }> = {
@@ -30,7 +42,7 @@ const LiveMessageFeed: React.FC<{ messages: Message[]; isLoading: boolean }> = (
           {messages.length} events
         </span>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', paddingRight: '4px' }}>
+      <div ref={scrollRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', paddingRight: '4px' }}>
         <AnimatePresence mode="popLayout">
           {isLoading ? (
             <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
@@ -97,7 +109,7 @@ const LiveMessageFeed: React.FC<{ messages: Message[]; isLoading: boolean }> = (
             })
           )}
         </AnimatePresence>
-        <div ref={endRef} />
+
       </div>
     </div>
   );
