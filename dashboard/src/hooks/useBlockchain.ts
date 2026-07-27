@@ -62,10 +62,23 @@ export const useBlockchain = () => {
           vault.proposalCount(),
         ]);
         if (stopped) return;
-        setTreasuryBalance(Number(ethers.formatUnits(bal, dec)));
-        setApy(Number(apyB) / 100);
-        setProposalCount(Number(pc));
-        setDemoMode(false);
+        const balN = Number(ethers.formatUnits(bal, dec));
+        const apyN = Number(apyB) / 100;
+        const pcN = Number(pc);
+        // Treasury untouched (fresh deploy: nothing deposited, no proposals yet).
+        // Show demo stats so the dashboard still looks alive; real data takes
+        // over automatically once balance / proposals appear.
+        if (pcN === 0 && balN === 0) {
+          setTreasuryBalance(100000);
+          setApy(12);
+          setProposalCount(0);
+          setDemoMode(true);
+        } else {
+          setTreasuryBalance(balN);
+          setApy(apyN);
+          setProposalCount(pcN);
+          setDemoMode(false);
+        }
         setNetworkStatus(`${CHAINS[ACTIVE_CHAIN_ID].name} · live`);
       } catch {
         if (!stopped) setDemoMode(true);
@@ -152,6 +165,11 @@ export const useAgentMessages = () => {
         if (!code || code === '0x') throw new Error('no bus');
         const bus = new ethers.Contract(ADDRESSES.MessageBus, ABIS.messageBus, p);
         const count = Number(await bus.getMessageCount());
+        if (count === 0) {
+          // No agent activity yet — show the demo feed so the panel looks alive.
+          if (!stopped) { setDemo(true); setMessages(MOCK_MESSAGES); setIsLoading(false); }
+          return;
+        }
         const start = Math.max(0, count - 20);
         const out: MessageType[] = [];
         for (let i = start; i < count; i++) {
