@@ -50,7 +50,7 @@ export default async function handler(req, res) {
     const { action } = req.body || {};
     const s = await read();
     if (action === 'pause') s.paused = true;
-    else if (action === 'resume' || action === 'start') s.paused = false;
+    else if (action === 'resume' || action === 'start') { s.paused = false; s.stop = false; }
     else if (action === 'stop') s.stop = true;
     else if (action === 'reset') {
       s.paused = false;

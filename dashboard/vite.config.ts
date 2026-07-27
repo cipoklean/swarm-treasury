@@ -78,7 +78,7 @@ function controlPlane(): Plugin {
                 const { action } = JSON.parse(body || '{}')
                 const s = await backend!.read()
                 if (action === 'pause') s.paused = true
-                else if (action === 'resume' || action === 'start') s.paused = false
+                else if (action === 'resume' || action === 'start') { s.paused = false; s.stop = false; }
                 else if (action === 'stop') s.stop = true
                 else if (action === 'reset') { s.paused = false; s.stop = false }
                 else return send(res, 400, { error: 'unknown action: ' + action })
