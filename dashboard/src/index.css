@@ -115,6 +115,13 @@ body::after {
 }
 .live-blink { animation: liveBlink 1.6s ease-in-out infinite; }
 
+/* Shimmer sweep for loading skeletons */
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-shimmer { animation: skeletonShimmer 1.6s ease-in-out infinite; }
+
 .chart-tooltip {
   background: var(--bg-elevated) !important;
   border: 1px solid var(--border-glow) !important;

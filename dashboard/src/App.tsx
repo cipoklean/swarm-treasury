@@ -1,32 +1,23 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import AgentStatusPanel from './components/AgentStatusPanel';
 import ControlPanel from './components/ControlPanel';
 import CommandStrip from './components/CommandStrip';
 import Pipeline, { PipelineStage } from './components/Pipeline';
-import { ConnectButton } from './wallet';
+import WalletStatus from './components/WalletStatus';
+import TreasuryOverview from './components/TreasuryOverview';
+import ActivityLog from './components/ActivityLog';
 import LiveMessageFeed from './components/LiveMessageFeed';
-import { TreasuryMetrics, TransactionLog, GovernorPanel } from './components';
+import { GovernorPanel } from './components';
+import { ErrorBanner } from './components/states';
 import { useBlockchain, useAgentMessages, MessageType } from './hooks/useBlockchain';
+import { useTreasuryActivity } from './hooks/useTreasuryActivity';
 import { useControlState } from './hooks/useControlState';
 import { C, FONT } from './theme';
 import { DEPLOYED_ADDRESSES, ACTIVE_CHAIN_ID, CHAINS } from './chainConfig';
 
 const chain = CHAINS[ACTIVE_CHAIN_ID] || CHAINS[968];
 const addresses = DEPLOYED_ADDRESSES[ACTIVE_CHAIN_ID as keyof typeof DEPLOYED_ADDRESSES];
-
-// Build transaction rows from the live MessageBus feed (no fake data)
-function messagesToTx(messages: MessageType[]) {
-  return messages.slice(0, 12).map((m) => ({
-    txHash: m.dataHash.replace('…', '') || `0x${m.messageId.toString(16).padStart(8, '0')}`,
-    action: `${m.agentName} · ${m.actionType}`,
-    amount: 0,
-    block: m.blockNumber,
-    time: m.timestamp,
-    gas: 0,
-    status: 'CONFIRMED' as const,
-  }));
-}
 
 // Derive pending approvals: proposals that were proposed but not yet approved/vetoed/executed
 function derivePending(messages: MessageType[]) {
@@ -50,8 +41,12 @@ function derivePending(messages: MessageType[]) {
 }
 
 const App: React.FC = () => {
-  const { blockNumber, blockTime, networkStatus, demoMode, treasuryBalance, apy, tokenSymbol } = useBlockchain();
+  const {
+    blockNumber, networkStatus, demoMode, apy, tokenSymbol,
+    totalBalance, availableBalance, deployedBalance, balanceSamples, loading, rpcError,
+  } = useBlockchain();
   const { messages, isLoading, agentCounts, activeFlow } = useAgentMessages();
+  const { activities, loading: activityLoading, error: activityError } = useTreasuryActivity();
   const { state: controlState } = useControlState();
 
   // Agent status derives from the control plane (stopped → OFFLINE, paused → THINKING)
@@ -63,7 +58,6 @@ const App: React.FC = () => {
     { name: 'Governor', role: 'GOVERNOR', address: addresses?.Governor || '0x0', status: agentStatus, lastAction: Date.now() },
   ]);
 
-  const transactions = useMemo(() => messagesToTx(messages), [messages]);
   const pendingApprovals = useMemo(() => derivePending(messages), [messages]);
 
   // Pipeline stages with live per-agent action counts
@@ -74,13 +68,6 @@ const App: React.FC = () => {
     { role: 'GOVERNOR', label: 'Governor', verb: 'oversees', status: agentStatus, count: agentCounts[4] || 0 },
   ];
   const agentsOnline = agents.filter((a) => a.status === 'ONLINE').length;
-
-  // Sparkline history centered on the live balance
-  const [balanceHistory, setBalanceHistory] = useState<number[]>(() =>
-    Array.from({ length: 24 }, (_, i) => Math.max(0, treasuryBalance * (0.94 + i * 0.0025))));
-  useEffect(() => {
-    setBalanceHistory((h) => [...h.slice(1), treasuryBalance * (0.99 + Math.random() * 0.02)]);
-  }, [treasuryBalance]);
 
   return (
     <div style={{
@@ -94,14 +81,14 @@ const App: React.FC = () => {
         controlState={controlState}
         agentsOnline={agentsOnline}
         agentsTotal={agents.length}
-        treasuryValue={treasuryBalance}
+        treasuryValue={totalBalance}
         tokenSymbol={tokenSymbol}
       />
 
       {/* ── Header ── */}
       <motion.header
         initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55 }}
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '22px' }}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', gap: 16 }}
       >
         <div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
@@ -126,24 +113,30 @@ const App: React.FC = () => {
           </p>
         </div>
 
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '12px',
-          background: `${C.card}cc`, backdropFilter: 'blur(12px)',
-          border: `1px solid ${C.border}`, borderRadius: '10px', padding: '10px 16px',
-        }}>
-          <ConnectButton />
-          <div style={{ width: 1, height: 26, background: C.border }} />
-          <div>
-            <div style={{
-              fontFamily: FONT.mono, fontSize: '0.58rem', fontWeight: 600, color: C.muted,
-              textTransform: 'uppercase', letterSpacing: '1.5px',
-            }}>{chain.name.split(' ')[0]}</div>
-            <div style={{ fontFamily: FONT.mono, fontSize: '0.85rem', fontWeight: 700, color: C.blue }}>
-              #{blockNumber.toLocaleString()}
-            </div>
-          </div>
-        </div>
+        {/* ── Wallet + network status (prominent) ── */}
+        <WalletStatus />
       </motion.header>
+
+      {/* ── RPC failure banner ── */}
+      {rpcError && (
+        <ErrorBanner
+          title="RPC connection lost"
+          detail={`Cannot reach ${chain.name} — live data is paused. The dashboard will recover automatically.`}
+          tone="error"
+        />
+      )}
+
+      {/* ── Treasury Overview: the hero band ── */}
+      <TreasuryOverview
+        totalBalance={totalBalance}
+        availableBalance={availableBalance}
+        deployedBalance={deployedBalance}
+        apy={apy}
+        balanceSamples={balanceSamples}
+        tokenSymbol={tokenSymbol}
+        loading={loading}
+        demoMode={demoMode}
+      />
 
       {/* ── Consensus Rail: how the swarm decides ── */}
       <Pipeline stages={stages} activeFlow={activeFlow} />
@@ -153,34 +146,24 @@ const App: React.FC = () => {
         <ControlPanel />
       </div>
 
-      {/* ── Top Row: Agents + Treasury ── */}
+      {/* ── Agents + Governor ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
         <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1, duration: 0.5 }}>
           <AgentStatusPanel agents={agents} />
         </motion.div>
         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15, duration: 0.5 }}>
-          <TreasuryMetrics
-            balance={treasuryBalance}
-            projectedBalance={Math.round(treasuryBalance * (1 + apy / 100))}
-            apy={apy}
-            balanceHistory={balanceHistory}
-          />
-        </motion.div>
-      </div>
-
-      {/* ── Middle Row: Messages + Governor ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', marginBottom: '20px' }}>
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <LiveMessageFeed messages={messages} isLoading={isLoading} />
-        </motion.div>
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
           <GovernorPanel pendingApprovals={pendingApprovals} />
         </motion.div>
       </div>
 
-      {/* ── Bottom: live event log ── */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-        <TransactionLog transactions={transactions} />
+      {/* ── Live agent message feed ── */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} style={{ marginBottom: '20px' }}>
+        <LiveMessageFeed messages={messages} isLoading={isLoading} />
+      </motion.div>
+
+      {/* ── Treasury activity: real on-chain events ── */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
+        <ActivityLog activities={activities} loading={activityLoading} error={activityError} />
       </motion.div>
 
       {/* ── Footer ── */}

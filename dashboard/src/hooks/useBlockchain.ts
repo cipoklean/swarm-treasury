@@ -10,19 +10,26 @@ const ERC20_ABI = [
 ];
 
 // ---------------------------------------------------------------------------
-// Live blockchain hook — reads block, treasury balance, APY, proposal count.
-// Falls back to demo values when no contract is deployed at the configured
-// address (so the dashboard never breaks and the filmed UI still looks alive).
+// Live blockchain hook — reads block, treasury balance (available + deployed),
+// APY and proposal count. Falls back to demo values when no contract is
+// deployed at the configured address (so the dashboard never breaks).
 // ---------------------------------------------------------------------------
 export const useBlockchain = () => {
   const [blockNumber, setBlockNumber] = useState<number>(0);
   const [blockTime, setBlockTime] = useState<number>(0.75);
   const [networkStatus, setNetworkStatus] = useState<string>('Connecting…');
   const [demoMode, setDemoMode] = useState<boolean>(false);
-  const [treasuryBalance, setTreasuryBalance] = useState<number>(100000);
+  const [availableBalance, setAvailableBalance] = useState<number>(0);
+  const [deployedBalance, setDeployedBalance] = useState<number>(0);
   const [apy, setApy] = useState<number>(12);
   const [proposalCount, setProposalCount] = useState<number>(0);
   const [provider, setProvider] = useState<ethers.Provider | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [rpcError, setRpcError] = useState<boolean>(false);
+  // Real balance samples over time → honest sparkline + "recent change" delta.
+  const [balanceSamples, setBalanceSamples] = useState<number[]>([]);
+
+  const totalBalance = availableBalance + deployedBalance;
 
   useEffect(() => {
     const p = new ethers.JsonRpcProvider(RPC_URL);
@@ -34,9 +41,10 @@ export const useBlockchain = () => {
         const bn = await p.getBlockNumber();
         if (stopped) return;
         setBlockNumber(bn);
+        setRpcError(false);
         setNetworkStatus(demoMode ? networkStatus : `${CHAINS[ACTIVE_CHAIN_ID].name} · live`);
       } catch {
-        if (!stopped) setNetworkStatus('RPC unavailable');
+        if (!stopped) { setNetworkStatus('RPC unavailable'); setRpcError(true); }
       }
     };
     tick();
@@ -49,39 +57,53 @@ export const useBlockchain = () => {
           if (!stopped) {
             setDemoMode(true);
             setNetworkStatus('DEMO MODE · no contracts at configured addresses');
+            // Demo figures so the hero still reads; clearly badged as DEMO.
+            setAvailableBalance(64000);
+            setDeployedBalance(36000);
+            setApy(12);
+            setProposalCount(0);
+            setBalanceSamples(Array.from({ length: 24 }, (_, i) => 100000 * (0.965 + i * 0.0015)));
+            setLoading(false);
           }
           return;
         }
         const vault = new ethers.Contract(ADDRESSES.TreasuryVault, ABIS.treasuryVault, p);
         const token = new ethers.Contract(ADDRESSES.MockToken, ERC20_ABI, p);
         const strat = new ethers.Contract(ADDRESSES.YieldStrategy, ABIS.yieldStrategy, p);
-        const [bal, dec, apyB, pc] = await Promise.all([
+        const [idle, dec, apyB, pc, deployed] = await Promise.all([
           token.balanceOf(ADDRESSES.TreasuryVault),
           token.decimals(),
-          strat.apyBps(),
+          strat.apyBps().catch(() => 0n),
           vault.proposalCount(),
+          strat.getBalance().catch(() => 0n),
         ]);
         if (stopped) return;
-        const balN = Number(ethers.formatUnits(bal, dec));
+        const idleN = Number(ethers.formatUnits(idle, dec));
+        const deployedN = Number(ethers.formatUnits(deployed, dec));
         const apyN = Number(apyB) / 100;
         const pcN = Number(pc);
         // Treasury untouched (fresh deploy: nothing deposited, no proposals yet).
         // Show demo stats so the dashboard still looks alive; real data takes
         // over automatically once balance / proposals appear.
-        if (pcN === 0 && balN === 0) {
-          setTreasuryBalance(100000);
+        if (pcN === 0 && idleN === 0 && deployedN === 0) {
+          setAvailableBalance(64000);
+          setDeployedBalance(36000);
           setApy(12);
           setProposalCount(0);
           setDemoMode(true);
+          setBalanceSamples(Array.from({ length: 24 }, (_, i) => 100000 * (0.965 + i * 0.0015)));
         } else {
-          setTreasuryBalance(balN);
+          setAvailableBalance(idleN);
+          setDeployedBalance(deployedN);
           setApy(apyN);
           setProposalCount(pcN);
           setDemoMode(false);
+          setBalanceSamples((s) => [...s.slice(-39), idleN + deployedN]);
         }
         setNetworkStatus(`${CHAINS[ACTIVE_CHAIN_ID].name} · live`);
+        setLoading(false);
       } catch {
-        if (!stopped) setDemoMode(true);
+        if (!stopped) { setDemoMode(true); setLoading(false); setRpcError(true); }
       }
     })();
 
@@ -93,8 +115,10 @@ export const useBlockchain = () => {
 
   return {
     blockNumber, blockTime, networkStatus, demoMode,
-    treasuryBalance, apy, proposalCount, tokenSymbol: TOKEN_SYMBOL,
+    availableBalance, deployedBalance, totalBalance,
+    apy, proposalCount, tokenSymbol: TOKEN_SYMBOL,
     provider, addresses: ADDRESSES,
+    loading, rpcError, balanceSamples,
   };
 };
 

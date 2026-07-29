@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { ethers } from 'ethers';
 import { C, FONT } from '../theme';
@@ -6,10 +6,14 @@ import { useWallet } from '../wallet';
 import { ADDRESSES, RPC_URL } from '../deployment';
 import { ABIS } from '../abis.generated';
 import { useControlState } from '../hooks/useControlState';
+import { CHAINS, ACTIVE_CHAIN_ID } from '../chainConfig';
+import TxConfirmModal from './TxConfirmModal';
 
 const GREEN = '#3fb950';
 const AMBER = '#d29922';
 const RED = '#f85149';
+
+const explorer = (CHAINS[ACTIVE_CHAIN_ID] || CHAINS[968]).explorer;
 
 const ControlPanel: React.FC = () => {
   const { address, signer, connect, connecting } = useWallet();
@@ -17,6 +21,7 @@ const ControlPanel: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [isGovernor, setIsGovernor] = useState<boolean | null>(null);
   const [govMsg, setGovMsg] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Is the connected wallet the governor/owner? (read-only call)
   useEffect(() => {
@@ -46,20 +51,22 @@ const ControlPanel: React.FC = () => {
     setBusy(false);
   };
 
-  const emergency = async () => {
-    setBusy(true);
-    setGovMsg(null);
-    try {
-      if (!signer) throw new Error('Connect the governor wallet first');
-      const gov = new ethers.Contract(ADDRESSES.Governor, ABIS.governor, signer);
-      const tx = await gov.emergencyPause();
-      setGovMsg('Emergency pause sent · tx ' + tx.hash.slice(0, 10) + '…');
-      await send('stop');
-    } catch (e: any) {
-      setGovMsg('Emergency failed: ' + (e?.message || e));
-    }
-    setBusy(false);
-  };
+  // Emergency pause now goes through TxConfirmModal: gas is estimated and
+  // shown BEFORE sending, then the tx is tracked Pending → Confirmed AFTER.
+  const onEstimate = useCallback(async () => {
+    if (!signer) throw new Error('Connect the governor wallet first');
+    const gov = new ethers.Contract(ADDRESSES.Governor, ABIS.governor, signer);
+    return gov.emergencyPause.estimateGas();
+  }, [signer]);
+
+  const onSend = useCallback(async () => {
+    if (!signer) throw new Error('Connect the governor wallet first');
+    const gov = new ethers.Contract(ADDRESSES.Governor, ABIS.governor, signer);
+    const tx = await gov.emergencyPause();
+    setGovMsg('Emergency pause sent · tx ' + tx.hash.slice(0, 10) + '…');
+    void send('stop');
+    return tx;
+  }, [signer, send]);
 
   const status = state.stop ? 'STOPPED' : state.paused ? 'PAUSED' : 'RUNNING';
   const color = state.stop ? RED : state.paused ? AMBER : GREEN;
@@ -114,7 +121,7 @@ const ControlPanel: React.FC = () => {
           <button onClick={() => act('pause')} disabled={busy} style={btn(AMBER)}>⏸ Pause</button>
           <button onClick={() => act('stop')} disabled={busy} style={btn(RED)}>⏹ Stop</button>
           <button onClick={() => act('reset')} disabled={busy} style={btnSecondary()}>↺ Reset</button>
-          <button onClick={emergency} disabled={busy} style={btn(RED)}>⚠ Emergency Pause (chain)</button>
+          <button onClick={() => setConfirmOpen(true)} disabled={busy} style={btn(RED)}>⚠ Emergency Pause (chain)</button>
         </div>
       )}
 
@@ -123,6 +130,18 @@ const ControlPanel: React.FC = () => {
           {govMsg}
         </p>
       )}
+
+      <TxConfirmModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title="Emergency Pause"
+        description="Halts all treasury operations on-chain immediately. This is a guardian safety action — proposals and strategy moves will be blocked until unpaused."
+        targetLabel="Governor Contract"
+        targetAddress={ADDRESSES.Governor}
+        explorer={explorer}
+        onEstimate={onEstimate}
+        onSend={onSend}
+      />
     </motion.div>
   );
 };
