@@ -172,6 +172,7 @@ class BotChainClient:
             return self._contracts[name]
         
         try:
+            address = self.w3.to_checksum_address(address)
             contract = self.w3.eth.contract(address=address, abi=abi)
             self._contracts[name] = contract
             logger.info(f"Loaded contract {name} at {address}")
