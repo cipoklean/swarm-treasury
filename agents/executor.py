@@ -2,6 +2,13 @@
 """
 Executor Agent — executes approved proposals on-chain
 Part of Swarm Treasury multi-agent system
+
+NOTE: The deployed TreasuryVault's proposals() getter returns 9 fields:
+  [0] proposer, [1] target, [2] value, [3] data, [4] deadline,
+  [5] forVotes, [6] againstVotes, [7] executed, [8] cancelled
+
+  Approval fields (yieldScoutApproved, riskGuardApproved, approvedAtBlock)
+  are NOT in the getter return data. We track approvals via events instead.
 """
 
 import asyncio
@@ -10,7 +17,7 @@ import logging
 import os
 import signal
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 
 from botchain_client import BotChainClient, get_botchain_client
 from control_state import ControlState
@@ -22,14 +29,102 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ApprovedAction:
-    """An action approved for execution"""
-    def __init__(self, proposal_id: int, target: str, value: int, data: bytes, block_number: int):
-        self.proposal_id = proposal_id
-        self.target = target
-        self.value = value
-        self.data = data
-        self.block_number = block_number
+# Minimal ABI — matches what the deployed contract actually returns
+MINIMAL_PROPOSAL_ABI = [
+    {
+        'name': 'proposals',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'id', 'type': 'uint256'}],
+        'outputs': [
+            {'name': 'proposer', 'type': 'address'},
+            {'name': 'target', 'type': 'address'},
+            {'name': 'value', 'type': 'uint256'},
+            {'name': 'data', 'type': 'bytes'},
+            {'name': 'deadline', 'type': 'uint256'},
+            {'name': 'forVotes', 'type': 'uint256'},
+            {'name': 'againstVotes', 'type': 'uint256'},
+            {'name': 'executed', 'type': 'bool'},
+            {'name': 'cancelled', 'type': 'bool'},
+        ]
+    },
+    {
+        'name': 'proposalCount',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [],
+        'outputs': [{'name': '', 'type': 'uint256'}]
+    },
+    {
+        'name': 'quorum',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [],
+        'outputs': [{'name': '', 'type': 'uint256'}]
+    },
+    {
+        'name': 'executeProposal',
+        'type': 'function',
+        'stateMutability': 'nonpayable',
+        'inputs': [{'name': 'proposalId', 'type': 'uint256'}],
+        'outputs': []
+    },
+    {
+        'name': 'vote',
+        'type': 'function',
+        'stateMutability': 'nonpayable',
+        'inputs': [
+            {'name': 'proposalId', 'type': 'uint256'},
+            {'name': 'support', 'type': 'bool'}
+        ],
+        'outputs': []
+    },
+    # Events for tracking approvals
+    {
+        'name': 'ProposalCreated',
+        'type': 'event',
+        'inputs': [
+            {'name': 'proposalId', 'type': 'uint256', 'indexed': True},
+            {'name': 'proposer', 'type': 'address', 'indexed': True},
+            {'name': 'target', 'type': 'address', 'indexed': False},
+            {'name': 'value', 'type': 'uint256', 'indexed': False},
+            {'name': 'data', 'type': 'bytes', 'indexed': False},
+            {'name': 'deadline', 'type': 'uint256', 'indexed': False},
+        ]
+    },
+    {
+        'name': 'RiskGuardApproved',
+        'type': 'event',
+        'inputs': [
+            {'name': 'proposalId', 'type': 'uint256', 'indexed': True},
+            {'name': 'agent', 'type': 'address', 'indexed': True},
+        ]
+    },
+    {
+        'name': 'YieldScoutApproved',
+        'type': 'event',
+        'inputs': [
+            {'name': 'proposalId', 'type': 'uint256', 'indexed': True},
+            {'name': 'agent', 'type': 'address', 'indexed': True},
+        ]
+    },
+    {
+        'name': 'VoteCast',
+        'type': 'event',
+        'inputs': [
+            {'name': 'proposalId', 'type': 'uint256', 'indexed': True},
+            {'name': 'voter', 'type': 'address', 'indexed': True},
+            {'name': 'support', 'type': 'bool', 'indexed': False},
+        ]
+    },
+    {
+        'name': 'ProposalExecuted',
+        'type': 'event',
+        'inputs': [
+            {'name': 'proposalId', 'type': 'uint256', 'indexed': True},
+        ]
+    },
+]
 
 
 class Executor:
@@ -40,92 +135,188 @@ class Executor:
         self.treasury_vault = None
         self.message_bus = None
         self.agent_registry = None
-        self.processed_proposals: Dict[int, bool] = {}
-        self.pending_actions: Dict[int, ApprovedAction] = {}
+        self.completed_proposals: Set[int] = set()  # permanently done
         self.retry_count: Dict[int, int] = {}
         self.max_retries = 3
+        # Event-based tracking
+        self.rg_approved: Set[int] = set()  # Risk Guard approved proposals
+        self.ys_approved: Set[int] = set()  # Yield Scout approved proposals (auto at creation)
+        self.voted_proposals: Set[int] = set()  # Proposals we voted on
+        self.last_event_block: int = 0  # scan progress
 
     async def initialize_contracts(self, config: Dict[str, Any]) -> None:
-        self.treasury_vault = self.client.load_contract('TreasuryVault', config['treasury_vault_address'], config['treasury_vault_abi'])
+        # Use full ABI for message_bus and agent_registry
         self.message_bus = self.client.load_contract('MessageBus', config['message_bus_address'], config['message_bus_abi'])
         self.agent_registry = self.client.load_contract('AgentRegistry', config['agent_registry_address'], config['agent_registry_abi'])
-        logger.info("Contracts initialized successfully")
 
-    async def check_approved_proposals(self) -> List[ApprovedAction]:
-        approved_actions = []
+        # Use MINIMAL ABI for treasury_vault (matches deployed contract)
+        self.treasury_vault = self.client.load_contract(
+            'TreasuryVault',
+            config['treasury_vault_address'],
+            MINIMAL_PROPOSAL_ABI
+        )
+        logger.info("Contracts initialized (using minimal proposals ABI)")
+
+    async def scan_approval_events(self) -> None:
+        """Scan blockchain events to track approval status for all proposals."""
+        try:
+            current_block = self.client.w3.eth.block_number
+            if self.last_event_block == 0:
+                self.last_event_block = max(1, current_block - 8000)
+
+            from_block = self.last_event_block + 1
+            to_block = current_block
+
+            if from_block > to_block:
+                return
+
+            # Scan RiskGuardApproved events
+            try:
+                rg_filter = self.treasury_vault.events.RiskGuardApproved.create_filter(
+                    fromBlock=from_block, toBlock=to_block
+                )
+                for event in rg_filter.get_all_entries():
+                    pid = event['args']['proposalId']
+                    self.rg_approved.add(pid)
+                    logger.info(f"Event: RiskGuardApproved proposal {pid}")
+            except Exception as e:
+                if 'does not exist' not in str(e).lower():
+                    logger.debug(f"RiskGuardApproved scan: {e}")
+
+            # YieldScoutApproved events (proposals auto-approved at creation)
+            try:
+                ys_filter = self.treasury_vault.events.YieldScoutApproved.create_filter(
+                    fromBlock=from_block, toBlock=to_block
+                )
+                for event in ys_filter.get_all_entries():
+                    pid = event['args']['proposalId']
+                    self.ys_approved.add(pid)
+                    logger.debug(f"Event: YieldScoutApproved proposal {pid}")
+            except Exception as e:
+                if 'does not exist' not in str(e).lower():
+                    logger.debug(f"YieldScoutApproved scan: {e}")
+
+            # Also mark all created proposals as yield-scout approved (createProposal sets it true)
+            try:
+                pc_filter = self.treasury_vault.events.ProposalCreated.create_filter(
+                    fromBlock=from_block, toBlock=to_block
+                )
+                for event in pc_filter.get_all_entries():
+                    pid = event['args']['proposalId']
+                    self.ys_approved.add(pid)
+            except Exception as e:
+                if 'does not exist' not in str(e).lower():
+                    logger.debug(f"ProposalCreated scan: {e}")
+
+            self.last_event_block = to_block
+
+        except Exception as e:
+            logger.error(f"Error scanning approval events: {e}")
+
+    async def get_ready_proposals(self) -> List[Dict]:
+        """Find proposals that are ready for execution."""
+        ready = []
         try:
             proposal_count = self.treasury_vault.functions.proposalCount().call()
             current_block = self.client.w3.eth.block_number
-            for proposal_id in range(1, proposal_count + 1):
-                # Skip proposals that completed successfully (True = done, False = failed/retryable)
-                if self.processed_proposals.get(proposal_id) is True:
+            quorum = self.treasury_vault.functions.quorum().call()
+
+            for proposal_id in range(max(1, proposal_count - 20), proposal_count + 1):
+                if proposal_id in self.completed_proposals:
                     continue
-                # Skip proposals that have been retried too many times
                 if self.retry_count.get(proposal_id, 0) >= self.max_retries:
-                    if proposal_id not in self.processed_proposals:
-                        self.processed_proposals[proposal_id] = True
+                    self.completed_proposals.add(proposal_id)
                     continue
 
-                proposal = self.treasury_vault.functions.proposals(proposal_id).call()
-                executed = proposal[7]
-                cancelled = proposal[8]
-                deadline = proposal[4]
-                ysa = proposal[9]   # yieldScoutApproved
-                rga = proposal[10]  # riskGuardApproved
-                approved_at = proposal[11] if len(proposal) > 11 else 0  # approvedAtBlock
+                try:
+                    p = self.treasury_vault.functions.proposals(proposal_id).call()
+                    # 9-field layout: proposer, target, value, data, deadline, forVotes, againstVotes, executed, cancelled
+                    executed = p[7]
+                    cancelled = p[8]
+                    deadline = p[4]
+                    for_votes = p[5]
 
-                # Skip: already done, cancelled, expired — permanently mark
-                if executed or cancelled or current_block > deadline:
-                    self.processed_proposals[proposal_id] = True
-                    continue
+                    if executed or cancelled:
+                        self.completed_proposals.add(proposal_id)
+                        continue
+                    if current_block > deadline:
+                        self.completed_proposals.add(proposal_id)
+                        continue
 
-                # Skip: not fully approved yet (will be rechecked next loop)
-                if not ysa or not rga:
-                    continue
+                    # Check approval via events
+                    is_rg_approved = proposal_id in self.rg_approved
+                    is_ys_approved = proposal_id in self.ys_approved  # always true for created proposals
+                    has_quorum = for_votes >= quorum
 
-                # Skip: execution delay (100 blocks) hasn't elapsed since approval
-                if approved_at == 0 or current_block < approved_at + 100:
-                    continue
+                    if not is_ys_approved or not is_rg_approved:
+                        continue
+                    if not has_quorum:
+                        continue
 
-                # Ready for execution — add to list (may be retried if it failed before)
-                action = ApprovedAction(proposal_id, proposal[1], proposal[2], proposal[3], 0)
-                approved_actions.append(action)
+                    ready.append({
+                        'proposal_id': proposal_id,
+                        'target': p[1],
+                        'value': p[2],
+                        'data': p[3],
+                        'deadline': deadline,
+                        'for_votes': for_votes,
+                    })
+                    logger.info(f"Proposal {proposal_id} READY: forVotes={for_votes}, RG approved, YS approved")
+
+                except Exception as e:
+                    logger.debug(f"Proposal {proposal_id} check error: {e}")
+
         except Exception as e:
-            logger.error(f"Error checking approved proposals: {e}")
-        return approved_actions
+            logger.error(f"Error finding ready proposals: {e}")
+        return ready
 
-    async def execute_action(self, action: ApprovedAction) -> bool:
+    async def execute_proposal(self, proposal_id: int) -> bool:
         try:
             # Vote YES first to ensure quorum
             try:
-                await self.client.send_transaction(self.treasury_vault, 'vote', [action.proposal_id, True], self.private_key)
-            except Exception as vote_err:
-                logger.debug(f"Vote skipped for proposal {action.proposal_id}: {vote_err}")
+                await self.client.send_transaction(self.treasury_vault, 'vote', [proposal_id, True], self.private_key)
+            except Exception as e:
+                logger.debug(f"Vote skipped for {proposal_id}: {e}")
 
-            tx_result = await self.client.send_transaction(self.treasury_vault, 'executeProposal', [action.proposal_id], self.private_key)
-
+            # Execute
+            tx_result = await self.client.send_transaction(
+                self.treasury_vault, 'executeProposal', [proposal_id], self.private_key
+            )
             receipt = tx_result['receipt']
             status = receipt.get('status') or receipt.get('Status')
             if status == 1:
-                self.pending_actions[action.proposal_id] = action
-                self.retry_count[action.proposal_id] = 0
-                current_block = await self.client.get_latest_block()
-                await self._post_message(action.proposal_id, 3, 1, current_block['number'], self.client.w3.keccak(text=f"EXECUTED:{tx_result['tx_hash']}"))
-                self._log_transaction(tx_result['tx_hash'], action.proposal_id, tx_result['block_number'], tx_result['block_hash'], tx_result['gas_used'])
-                logger.info(f"Executed proposal {action.proposal_id}: {tx_result['tx_hash']}")
+                logger.info(f"✅ Executed proposal {proposal_id}: {tx_result['tx_hash']}")
+                self._log_transaction(tx_result['tx_hash'], proposal_id, tx_result['block_number'], tx_result['block_hash'], tx_result['gas_used'])
+                # Post message
+                try:
+                    current_block = await self.client.get_latest_block()
+                    keccak = self.client.w3.keccak(text=f"EXECUTED:{tx_result['tx_hash']}")
+                    await self.client.send_transaction(
+                        self.message_bus, 'postMessage',
+                        [proposal_id, 3, 1, current_block['number'], keccak],
+                        self.private_key
+                    )
+                except Exception as e:
+                    logger.debug(f"Post-message failed: {e}")
                 return True
             else:
-                logger.error(f"Execution failed for proposal {action.proposal_id}")
+                logger.error(f"❌ Execution reverted for proposal {proposal_id}")
                 return False
         except Exception as e:
-            logger.error(f"Failed to execute proposal {action.proposal_id}: {e}")
+            err_str = str(e)
+            if "Proposal expired" in err_str:
+                logger.warning(f"Proposal {proposal_id} expired before execution")
+            elif "Yield Scout not approved" in err_str:
+                logger.warning(f"Proposal {proposal_id}: Yield Scout not approved on-chain")
+            elif "Risk Guard not approved" in err_str:
+                logger.warning(f"Proposal {proposal_id}: Risk Guard not approved on-chain")
+            elif "Execution delay not elapsed" in err_str:
+                logger.info(f"Proposal {proposal_id}: execution delay not yet elapsed")
+            elif "Quorum not met" in err_str:
+                logger.info(f"Proposal {proposal_id}: quorum not met yet")
+            else:
+                logger.error(f"Execution failed for proposal {proposal_id}: {e}")
             return False
-
-    async def _post_message(self, proposal_id, agent_role, message_type, block_number, data_hash):
-        try:
-            await self.client.send_transaction(self.message_bus, 'postMessage', [proposal_id, agent_role, message_type, block_number, data_hash], self.private_key)
-        except Exception as e:
-            logger.error(f"Failed to post message: {e}")
 
     def _log_transaction(self, tx_hash, proposal_id, block_number, block_hash, gas_used):
         try:
@@ -138,10 +329,9 @@ class Executor:
             logger.error(f"Failed to log transaction: {e}")
 
     async def run(self) -> None:
-        logger.info("Executor agent started")
+        logger.info("Executor agent started (minimal ABI mode)")
         self.control = ControlState()
 
-        # Graceful shutdown on SIGTERM (Docker/Render) and SIGINT (Ctrl+C)
         def _shutdown(signum, frame):
             logger.info(f"Received signal {signum} — requesting stop")
             self.control.stop()
@@ -150,7 +340,6 @@ class Executor:
 
         while True:
             try:
-                # --- bot control plane ---
                 if self.control.should_stop():
                     logger.info("Stop signal received — shutting down Executor.")
                     return
@@ -159,16 +348,23 @@ class Executor:
                     await asyncio.sleep(2)
                     continue
 
-                approved_actions = await self.check_approved_proposals()
-                for action in approved_actions:
-                    success = await self.execute_action(action)
+                # 1. Scan approval events to update tracking
+                await self.scan_approval_events()
+
+                # 2. Find proposals ready for execution
+                ready = await self.get_ready_proposals()
+
+                # 3. Execute each ready proposal
+                for proposal in ready:
+                    pid = proposal['proposal_id']
+                    success = await self.execute_proposal(pid)
                     if success:
-                        self.processed_proposals[action.proposal_id] = True
+                        self.completed_proposals.add(pid)
                     else:
-                        # Keep retryable (False in dict or absent) so next loop retries
-                        self.retry_count[action.proposal_id] = self.retry_count.get(action.proposal_id, 0) + 1
-                        logger.warning(f"Proposal {action.proposal_id} attempt {self.retry_count[action.proposal_id]}/{self.max_retries}")
+                        self.retry_count[pid] = self.retry_count.get(pid, 0) + 1
+
                 await asyncio.sleep(0.75)
+
             except KeyboardInterrupt:
                 logger.info("Executor agent stopping")
                 break
