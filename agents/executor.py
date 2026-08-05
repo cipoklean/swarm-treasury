@@ -57,18 +57,28 @@ class Executor:
             proposal_count = self.treasury_vault.functions.proposalCount().call()
             current_block = self.client.w3.eth.block_number
             for proposal_id in range(1, proposal_count + 1):
-                if proposal_id not in self.processed_proposals:
-                    proposal = self.treasury_vault.functions.proposals(proposal_id).call()
-                    executed = proposal[7]
-                    cancelled = proposal[8]
-                    deadline = proposal[4] if len(proposal) > 4 else 0
-                    # Skip expired proposals — don't waste gas
-                    if executed or cancelled or (deadline > 0 and current_block > deadline):
-                        self.processed_proposals[proposal_id] = True
-                        continue
-                    action = ApprovedAction(proposal_id, proposal[1], proposal[2], proposal[3], 0)
-                    approved_actions.append(action)
-                    self.processed_proposals[proposal_id] = False
+                if proposal_id in self.processed_proposals:
+                    continue
+                proposal = self.treasury_vault.functions.proposals(proposal_id).call()
+                executed = proposal[7]
+                cancelled = proposal[8]
+                deadline = proposal[4]
+                ysa = proposal[9]   # yieldScoutApproved
+                rga = proposal[10]  # riskGuardApproved
+                approved_at = proposal[11] if len(proposal) > 11 else 0  # approvedAtBlock
+                # Skip: already done, cancelled, expired
+                if executed or cancelled or current_block > deadline:
+                    self.processed_proposals[proposal_id] = True
+                    continue
+                # Skip: not fully approved yet
+                if not ysa or not rga:
+                    continue
+                # Skip: execution delay (100 blocks) hasn't elapsed since approval
+                if approved_at == 0 or current_block < approved_at + 100:
+                    continue
+                action = ApprovedAction(proposal_id, proposal[1], proposal[2], proposal[3], 0)
+                approved_actions.append(action)
+                self.processed_proposals[proposal_id] = False
         except Exception as e:
             logger.error(f"Error checking approved proposals: {e}")
         return approved_actions
