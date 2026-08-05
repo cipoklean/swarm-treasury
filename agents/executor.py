@@ -55,15 +55,20 @@ class Executor:
         approved_actions = []
         try:
             proposal_count = self.treasury_vault.functions.proposalCount().call()
+            current_block = self.client.w3.eth.block_number
             for proposal_id in range(1, proposal_count + 1):
                 if proposal_id not in self.processed_proposals:
                     proposal = self.treasury_vault.functions.proposals(proposal_id).call()
                     executed = proposal[7]
                     cancelled = proposal[8]
-                    if not executed and not cancelled:
-                            action = ApprovedAction(proposal_id, proposal[1], proposal[2], proposal[3], 0)
-                            approved_actions.append(action)
-                            self.processed_proposals[proposal_id] = False
+                    deadline = proposal[4] if len(proposal) > 4 else 0
+                    # Skip expired proposals — don't waste gas
+                    if executed or cancelled or (deadline > 0 and current_block > deadline):
+                        self.processed_proposals[proposal_id] = True
+                        continue
+                    action = ApprovedAction(proposal_id, proposal[1], proposal[2], proposal[3], 0)
+                    approved_actions.append(action)
+                    self.processed_proposals[proposal_id] = False
         except Exception as e:
             logger.error(f"Error checking approved proposals: {e}")
         return approved_actions

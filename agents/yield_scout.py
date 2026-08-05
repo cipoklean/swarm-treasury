@@ -66,9 +66,9 @@ class YieldScout:
         self.client = get_botchain_client()
         
         # Configuration
-        self.poll_interval = 3  # blocks
+        self.poll_interval = 30  # blocks (~22s — gives executor time to settle)
         self.apy_threshold = 1000  # 10% in basis points
-        self.min_investment = 100 * 10**18  # 100 tokens minimum
+        self.min_investment = 10_000 * 10**18  # 10k tokens minimum
         
         # State
         self.last_poll_block = 0
