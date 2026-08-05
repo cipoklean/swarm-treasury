@@ -168,11 +168,10 @@ class Executor:
         }
         return self.client.w3.eth.get_logs(filter_obj)
 
-    @staticmethod
-    def _event_topic(signature: str) -> str:
-        """Compute keccak256 event topic hash."""
-        from web3 import Web
-        return Web.keccak(text=signature).hex()
+    # Hardcoded event topic hashes (keccak256 of event signatures)
+    RG_TOPIC = '0xcf5ab974f546a320459b3c9f675829d931ada4f64278729a23fd948155e3f746'
+    YS_TOPIC = '0x141030f00fc23d5dfb667424910f036e988a750aeb44129fcb7b55a7d9da51ad'
+    PC_TOPIC = '0x561f90d9617123cf27df55516c5c710aa97b580a9570f46efe5cc75500f67dc5'
 
     async def scan_approval_events(self) -> None:
         """Scan blockchain events to track approval status for all proposals.
@@ -192,11 +191,6 @@ class Executor:
             if from_block > to_block:
                 return
 
-            # Pre-compute event topic hashes
-            rg_topic = self._event_topic('RiskGuardApproved(uint256,address)')
-            ys_topic = self._event_topic('YieldScoutApproved(uint256,address)')
-            pc_topic = self._event_topic('ProposalCreated(uint256,address,address,uint256,bytes,uint256)')
-
             rg_count = 0
             ys_count = 0
             pc_count = 0
@@ -204,7 +198,7 @@ class Executor:
             # Scan RiskGuardApproved events via raw eth_getLogs
             try:
                 rg_logs = await asyncio.to_thread(
-                    self._get_raw_logs, rg_topic, from_block, to_block
+                    self._get_raw_logs, self.RG_TOPIC, from_block, to_block
                 )
                 for log in rg_logs:
                     # proposalId is indexed topic[1] — decode from hex
@@ -220,7 +214,7 @@ class Executor:
             # YieldScoutApproved events
             try:
                 ys_logs = await asyncio.to_thread(
-                    self._get_raw_logs, ys_topic, from_block, to_block
+                    self._get_raw_logs, self.YS_TOPIC, from_block, to_block
                 )
                 for log in ys_logs:
                     if log.get('topics') and len(log['topics']) >= 2:
@@ -235,7 +229,7 @@ class Executor:
             # ProposalCreated events (createProposal auto-sets yieldScoutApproved=true)
             try:
                 pc_logs = await asyncio.to_thread(
-                    self._get_raw_logs, pc_topic, from_block, to_block
+                    self._get_raw_logs, self.PC_TOPIC, from_block, to_block
                 )
                 for log in pc_logs:
                     if log.get('topics') and len(log['topics']) >= 2:
