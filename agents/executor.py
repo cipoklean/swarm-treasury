@@ -57,8 +57,15 @@ class Executor:
             proposal_count = self.treasury_vault.functions.proposalCount().call()
             current_block = self.client.w3.eth.block_number
             for proposal_id in range(1, proposal_count + 1):
-                if proposal_id in self.processed_proposals:
+                # Skip proposals that completed successfully (True = done, False = failed/retryable)
+                if self.processed_proposals.get(proposal_id) is True:
                     continue
+                # Skip proposals that have been retried too many times
+                if self.retry_count.get(proposal_id, 0) >= self.max_retries:
+                    if proposal_id not in self.processed_proposals:
+                        self.processed_proposals[proposal_id] = True
+                    continue
+
                 proposal = self.treasury_vault.functions.proposals(proposal_id).call()
                 executed = proposal[7]
                 cancelled = proposal[8]
@@ -66,19 +73,23 @@ class Executor:
                 ysa = proposal[9]   # yieldScoutApproved
                 rga = proposal[10]  # riskGuardApproved
                 approved_at = proposal[11] if len(proposal) > 11 else 0  # approvedAtBlock
-                # Skip: already done, cancelled, expired
+
+                # Skip: already done, cancelled, expired — permanently mark
                 if executed or cancelled or current_block > deadline:
                     self.processed_proposals[proposal_id] = True
                     continue
-                # Skip: not fully approved yet
+
+                # Skip: not fully approved yet (will be rechecked next loop)
                 if not ysa or not rga:
                     continue
+
                 # Skip: execution delay (100 blocks) hasn't elapsed since approval
                 if approved_at == 0 or current_block < approved_at + 100:
                     continue
+
+                # Ready for execution — add to list (may be retried if it failed before)
                 action = ApprovedAction(proposal_id, proposal[1], proposal[2], proposal[3], 0)
                 approved_actions.append(action)
-                self.processed_proposals[proposal_id] = False
         except Exception as e:
             logger.error(f"Error checking approved proposals: {e}")
         return approved_actions
@@ -150,8 +161,13 @@ class Executor:
 
                 approved_actions = await self.check_approved_proposals()
                 for action in approved_actions:
-                    await self.execute_action(action)
-                    self.processed_proposals[action.proposal_id] = True
+                    success = await self.execute_action(action)
+                    if success:
+                        self.processed_proposals[action.proposal_id] = True
+                    else:
+                        # Keep retryable (False in dict or absent) so next loop retries
+                        self.retry_count[action.proposal_id] = self.retry_count.get(action.proposal_id, 0) + 1
+                        logger.warning(f"Proposal {action.proposal_id} attempt {self.retry_count[action.proposal_id]}/{self.max_retries}")
                 await asyncio.sleep(0.75)
             except KeyboardInterrupt:
                 logger.info("Executor agent stopping")

@@ -309,7 +309,7 @@ class YieldScout:
                 current_block = await self.client.get_latest_block()
                 current_block_number = current_block['number']
                 
-                # Check if we should poll (every 3 blocks)
+                # Check if we should poll (every 30 blocks)
                 if current_block_number >= self.last_poll_block + self.poll_interval:
                     self.last_poll_block = current_block_number
                     

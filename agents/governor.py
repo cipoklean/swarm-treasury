@@ -228,14 +228,14 @@ class Governor:
                     response = input("Approve [Y/n]: ").strip().lower()
                     
                     if response in ['y', 'yes', '']:
-                        # Approve
-                        await self._approve_proposal(approval.proposal_id)
-                        logger.info(f"Governor approved proposal {approval.proposal_id}")
+                        # Approve — vote YES
+                        await self._vote_proposal(approval.proposal_id, True)
+                        logger.info(f"Governor voted YES on proposal {approval.proposal_id}")
                         return True
                     elif response in ['n', 'no']:
-                        # Veto
-                        await self._veto_proposal(approval.proposal_id, "Governor veto")
-                        logger.info(f"Governor vetoed proposal {approval.proposal_id}")
+                        # Veto — vote NO
+                        await self._vote_proposal(approval.proposal_id, False)
+                        logger.info(f"Governor voted NO on proposal {approval.proposal_id}")
                         return False
                     else:
                         print("Please enter 'Y' for yes or 'N' for no")
@@ -244,9 +244,9 @@ class Governor:
                     # Timeout
                     break
             
-            # Timeout - auto-veto
-            await self._veto_proposal(approval.proposal_id, "Approval timeout")
-            logger.info(f"Auto-vetoed proposal {approval.proposal_id} (timeout)")
+            # Timeout - auto-vote NO
+            await self._vote_proposal(approval.proposal_id, False)
+            logger.info(f"Auto-voted NO on proposal {approval.proposal_id} (timeout)")
             return False
             
         except Exception as e:
@@ -269,28 +269,28 @@ class Governor:
         except Exception as e:
             logger.warning(f"Failed to send desktop notification: {e}")
     
-    async def _approve_proposal(self, proposal_id: int) -> None:
-        """Approve a proposal"""
+    async def _vote_proposal(self, proposal_id: int, support: bool) -> None:
+        """Vote on a proposal"""
         try:
             await self.client.send_transaction(
                 self.treasury_vault,
-                'approveProposal',
-                [proposal_id],
+                'vote',
+                [proposal_id, support],
                 self.private_key
             )
-            
-            # Post approval message
+
+            # Post vote message
             current_block = await self.client.get_latest_block()
             await self._post_message(
                 proposal_id,
                 4,  # GOVERNOR_ROLE
                 1,  # APPROVAL message type
                 current_block['number'],
-                self.client.w3.keccak(text=f"GOVERNOR_APPROVED")
+                self.client.w3.keccak(text=f"GOVERNOR_VOTED:{'YES' if support else 'NO'}")
             )
-            
+
         except Exception as e:
-            logger.error(f"Failed to approve proposal {proposal_id}: {e}")
+            logger.error(f"Failed to vote on proposal {proposal_id}: {e}")
     
     async def _veto_proposal(self, proposal_id: int, reason: str) -> None:
         """Veto a proposal"""
