@@ -158,11 +158,16 @@ class Executor:
         logger.info("Contracts initialized (using minimal proposals ABI)")
 
     async def scan_approval_events(self) -> None:
-        """Scan blockchain events to track approval status for all proposals."""
+        """Scan blockchain events to track approval status for all proposals.
+        Uses get_logs() (eth_getLogs) instead of create_filter() (eth_newFilter)
+        because many testnet nodes don't support eth_newFilter."""
         try:
-            current_block = self.client.w3.eth.block_number
+            current_block = await asyncio.to_thread(
+                lambda: self.client.w3.eth.block_number
+            )
             if self.last_event_block == 0:
-                self.last_event_block = max(1, current_block - 8000)
+                # On first run, scan from much further back to catch all historical events
+                self.last_event_block = max(1, current_block - 50000)
 
             from_block = self.last_event_block + 1
             to_block = current_block
@@ -170,58 +175,91 @@ class Executor:
             if from_block > to_block:
                 return
 
-            # Scan RiskGuardApproved events
+            rg_count = 0
+            ys_count = 0
+            pc_count = 0
+
+            # Scan RiskGuardApproved events using get_logs (eth_getLogs)
             try:
-                rg_filter = self.treasury_vault.events.RiskGuardApproved.create_filter(
-                    fromBlock=from_block, toBlock=to_block
+                rg_logs = await asyncio.to_thread(
+                    lambda: self.treasury_vault.events.RiskGuardApproved.get_logs(
+                        fromBlock=from_block, toBlock=to_block
+                    )
                 )
-                for event in rg_filter.get_all_entries():
+                for event in rg_logs:
                     pid = event['args']['proposalId']
                     self.rg_approved.add(pid)
-                    logger.info(f"Event: RiskGuardApproved proposal {pid}")
+                    rg_count += 1
+                if rg_count > 0:
+                    logger.info(f"Scanned {rg_count} RiskGuardApproved events (blocks {from_block}-{to_block})")
             except Exception as e:
-                if 'does not exist' not in str(e).lower():
-                    logger.debug(f"RiskGuardApproved scan: {e}")
+                logger.warning(f"RiskGuardApproved scan error: {e}")
 
-            # YieldScoutApproved events (proposals auto-approved at creation)
+            # YieldScoutApproved events
             try:
-                ys_filter = self.treasury_vault.events.YieldScoutApproved.create_filter(
-                    fromBlock=from_block, toBlock=to_block
+                ys_logs = await asyncio.to_thread(
+                    lambda: self.treasury_vault.events.YieldScoutApproved.get_logs(
+                        fromBlock=from_block, toBlock=to_block
+                    )
                 )
-                for event in ys_filter.get_all_entries():
+                for event in ys_logs:
                     pid = event['args']['proposalId']
                     self.ys_approved.add(pid)
-                    logger.debug(f"Event: YieldScoutApproved proposal {pid}")
+                    ys_count += 1
+                if ys_count > 0:
+                    logger.info(f"Scanned {ys_count} YieldScoutApproved events")
             except Exception as e:
-                if 'does not exist' not in str(e).lower():
-                    logger.debug(f"YieldScoutApproved scan: {e}")
+                logger.warning(f"YieldScoutApproved scan error: {e}")
 
-            # Also mark all created proposals as yield-scout approved (createProposal sets it true)
+            # ProposalCreated events (createProposal auto-sets yieldScoutApproved=true)
             try:
-                pc_filter = self.treasury_vault.events.ProposalCreated.create_filter(
-                    fromBlock=from_block, toBlock=to_block
+                pc_logs = await asyncio.to_thread(
+                    lambda: self.treasury_vault.events.ProposalCreated.get_logs(
+                        fromBlock=from_block, toBlock=to_block
+                    )
                 )
-                for event in pc_filter.get_all_entries():
+                for event in pc_logs:
                     pid = event['args']['proposalId']
                     self.ys_approved.add(pid)
+                    pc_count += 1
+                if pc_count > 0:
+                    logger.info(f"Scanned {pc_count} ProposalCreated events")
             except Exception as e:
-                if 'does not exist' not in str(e).lower():
-                    logger.debug(f"ProposalCreated scan: {e}")
+                logger.warning(f"ProposalCreated scan error: {e}")
 
             self.last_event_block = to_block
+            if rg_count + ys_count + pc_count > 0:
+                logger.info(f"Approval sets: {len(self.rg_approved)} RG-approved, {len(self.ys_approved)} YS-approved")
 
         except Exception as e:
             logger.error(f"Error scanning approval events: {e}")
 
     async def get_ready_proposals(self) -> List[Dict]:
-        """Find proposals that are ready for execution."""
+        """Find proposals that are ready for execution.
+        Checks proposals that have both RG and YS approval via event tracking,
+        then verifies on-chain status via the 9-field proposals() getter."""
         ready = []
         try:
-            proposal_count = self.treasury_vault.functions.proposalCount().call()
-            current_block = self.client.w3.eth.block_number
-            quorum = self.treasury_vault.functions.quorum().call()
+            proposal_count = await asyncio.to_thread(
+                lambda: self.treasury_vault.functions.proposalCount().call()
+            )
+            current_block = await asyncio.to_thread(
+                lambda: self.client.w3.eth.block_number
+            )
+            quorum = await asyncio.to_thread(
+                lambda: self.treasury_vault.functions.quorum().call()
+            )
 
-            for proposal_id in range(max(1, proposal_count - 20), proposal_count + 1):
+            # Check ALL proposals that have both approvals (from event tracking)
+            # Also check recent proposals that might just have gotten approved
+            candidates = self.rg_approved | self.ys_approved
+            # Add recent proposals (last 50) in case events were missed
+            candidates.update(range(max(1, proposal_count - 50), proposal_count + 1))
+
+            checked = 0
+            for proposal_id in sorted(candidates):
+                if proposal_id < 1 or proposal_id > proposal_count:
+                    continue
                 if proposal_id in self.completed_proposals:
                     continue
                 if self.retry_count.get(proposal_id, 0) >= self.max_retries:
@@ -229,7 +267,9 @@ class Executor:
                     continue
 
                 try:
-                    p = self.treasury_vault.functions.proposals(proposal_id).call()
+                    p = await asyncio.to_thread(
+                        lambda pid=proposal_id: self.treasury_vault.functions.proposals(pid).call()
+                    )
                     # 9-field layout: proposer, target, value, data, deadline, forVotes, againstVotes, executed, cancelled
                     executed = p[7]
                     cancelled = p[8]
@@ -262,6 +302,7 @@ class Executor:
                         'for_votes': for_votes,
                     })
                     logger.info(f"Proposal {proposal_id} READY: forVotes={for_votes}, RG approved, YS approved")
+                    checked += 1
 
                 except Exception as e:
                     logger.debug(f"Proposal {proposal_id} check error: {e}")
@@ -348,11 +389,18 @@ class Executor:
                     await asyncio.sleep(2)
                     continue
 
+                current_block = await asyncio.to_thread(
+                    lambda: self.client.w3.eth.block_number
+                )
+
                 # 1. Scan approval events to update tracking
                 await self.scan_approval_events()
 
                 # 2. Find proposals ready for execution
                 ready = await self.get_ready_proposals()
+
+                if not ready:
+                    logger.info(f"Loop @{current_block}: no ready proposals (RG={len(self.rg_approved)}, YS={len(self.ys_approved)}, completed={len(self.completed_proposals)})")
 
                 # 3. Execute each ready proposal
                 for proposal in ready:
