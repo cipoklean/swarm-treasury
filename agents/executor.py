@@ -183,7 +183,7 @@ class Executor:
             try:
                 rg_logs = await asyncio.to_thread(
                     lambda: self.treasury_vault.events.RiskGuardApproved.get_logs(
-                        fromBlock=from_block, toBlock=to_block
+                        from_block=from_block, to_block=to_block
                     )
                 )
                 for event in rg_logs:
@@ -199,7 +199,7 @@ class Executor:
             try:
                 ys_logs = await asyncio.to_thread(
                     lambda: self.treasury_vault.events.YieldScoutApproved.get_logs(
-                        fromBlock=from_block, toBlock=to_block
+                        from_block=from_block, to_block=to_block
                     )
                 )
                 for event in ys_logs:
@@ -215,7 +215,7 @@ class Executor:
             try:
                 pc_logs = await asyncio.to_thread(
                     lambda: self.treasury_vault.events.ProposalCreated.get_logs(
-                        fromBlock=from_block, toBlock=to_block
+                        from_block=from_block, to_block=to_block
                     )
                 )
                 for event in pc_logs:
