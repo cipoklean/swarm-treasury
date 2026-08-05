@@ -82,10 +82,10 @@ export const useBlockchain = () => {
         const deployedN = Number(ethers.formatUnits(deployed, dec));
         const apyN = Number(apyB) / 100;
         const pcN = Number(pc);
-        // Treasury untouched (fresh deploy: nothing deposited, no proposals yet).
+        // Treasury untouched (fresh deploy: nothing deposited, no strategies).
         // Show demo stats so the dashboard still looks alive; real data takes
-        // over automatically once balance / proposals appear.
-        if (pcN === 0 && idleN === 0 && deployedN === 0) {
+        // over automatically once balance / strategies appear.
+        if (idleN === 0 && deployedN === 0) {
           setAvailableBalance(64000);
           setDeployedBalance(36000);
           setApy(12);
@@ -145,25 +145,13 @@ export type MessageType = {
 
 const ACTION_LABELS = ['PROPOSAL', 'APPROVAL', 'VETO', 'EXECUTED', 'PAUSE', 'RESUME'];
 
-function mapMessage(m: any, id: number): MessageType {
-  const msgType = Number(m.msgType ?? m[1] ?? 0);
-  const block = Number(m.blockNumber ?? m[5] ?? 0);
-  const ts = Number(m.timestamp ?? m[4] ?? 0);
-  const data = m.data ?? m[3] ?? '0x';
-  const dataHash =
-    typeof data === 'string' ? data.slice(0, 10) : ethers.hexlify(data as any).slice(0, 10);
-  return {
-    messageId: Number(m.id ?? m[0] ?? id),
-    proposalId: Number(m.proposalId ?? 0),
-    agentRole: msgType,
-    messageType: msgType,
-    blockNumber: block,
-    dataHash: dataHash + '…',
-    timestamp: ts ? ts * 1000 : Date.now(),
-    agentName: ['Yield Scout', 'Risk Guard', 'Executor', 'Governor'][Math.min(msgType, 3)] || 'Agent',
-    actionType: ACTION_LABELS[msgType] || 'MESSAGE',
-  };
-}
+// Role hashes (keccak256 of the role name strings — match TreasuryVault.sol)
+const ROLE_HASHES = {
+  yieldScout: '0x' + ethers.keccak256(ethers.toUtf8Bytes('YIELD_SCOUT_ROLE')).slice(2),
+  riskGuard:  '0x' + ethers.keccak256(ethers.toUtf8Bytes('RISK_GUARD_ROLE')).slice(2),
+  executor:   '0x' + ethers.keccak256(ethers.toUtf8Bytes('EXECUTOR_ROLE')).slice(2),
+  governor:   '0x' + ethers.keccak256(ethers.toUtf8Bytes('GOVERNOR_ROLE')).slice(2),
+};
 
 const MOCK_MESSAGES: MessageType[] = [
   { messageId: 1, proposalId: 1, agentRole: 1, messageType: 0, blockNumber: 12345, dataHash: '0xabc123…', timestamp: Date.now() - 60000, agentName: 'Yield Scout', actionType: 'PROPOSAL' },
@@ -171,8 +159,25 @@ const MOCK_MESSAGES: MessageType[] = [
   { messageId: 3, proposalId: 1, agentRole: 3, messageType: 3, blockNumber: 12347, dataHash: '0xghi789…', timestamp: Date.now() - 10000, agentName: 'Executor', actionType: 'EXECUTED' },
 ];
 
+const LOOKBACK = 8000; // ~100 min at 0.75s blocks
+
+/**
+ * Identify which agent role a voter address holds on the vault by checking
+ * hasRole for each role hash. Returns 1-4 or 0 if unknown.
+ */
+async function identifyRole(vault: ethers.Contract, addr: string): Promise<number> {
+  try {
+    if (await vault.hasRole(ROLE_HASHES.governor, addr))   return 4;
+    if (await vault.hasRole(ROLE_HASHES.executor, addr))   return 3;
+    if (await vault.hasRole(ROLE_HASHES.riskGuard, addr))  return 2;
+    if (await vault.hasRole(ROLE_HASHES.yieldScout, addr)) return 1;
+  } catch { /* role check failed */ }
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
-// Agent message feed — reads the MessageBus when deployed, else demo feed.
+// Agent message feed — reads TreasuryVault events directly (the MessageBus
+// contract was never deployed, so we fall back to the on-chain event log).
 // ---------------------------------------------------------------------------
 export const useAgentMessages = () => {
   const [messages, setMessages] = useState<MessageType[]>([]);
@@ -185,24 +190,129 @@ export const useAgentMessages = () => {
 
     const load = async () => {
       try {
-        const code = await p.getCode(ADDRESSES.MessageBus);
-        if (!code || code === '0x') throw new Error('no bus');
-        const bus = new ethers.Contract(ADDRESSES.MessageBus, ABIS.messageBus, p);
-        const count = Number(await bus.getMessageCount());
-        if (count === 0) {
-          // No agent activity yet — show the demo feed so the panel looks alive.
-          if (!stopped) { setDemo(true); setMessages(MOCK_MESSAGES); setIsLoading(false); }
-          return;
-        }
-        const start = Math.max(0, count - 20);
+        const code = await p.getCode(ADDRESSES.TreasuryVault);
+        if (!code || code === '0x') throw new Error('no vault');
+
+        const vault = new ethers.Contract(ADDRESSES.TreasuryVault, ABIS.treasuryVault, p);
+        const latest = await p.getBlockNumber();
+        const fromBlock = Math.max(0, latest - LOOKBACK);
+
+        // Fire all event queries in parallel
+        const [proposals, riskApprovals, scoutApprovals, votes, executed, cancelled] = await Promise.all([
+          vault.queryFilter('ProposalCreated' as any, fromBlock, latest).catch(() => []),
+          vault.queryFilter('RiskGuardApproved' as any, fromBlock, latest).catch(() => []),
+          vault.queryFilter('YieldScoutApproved' as any, fromBlock, latest).catch(() => []),
+          vault.queryFilter('VoteCast' as any, fromBlock, latest).catch(() => []),
+          vault.queryFilter('ProposalExecuted' as any, fromBlock, latest).catch(() => []),
+          vault.queryFilter('ProposalCancelled' as any, fromBlock, latest).catch(() => []),
+        ]);
+
+        // Build a cache of address → role to avoid redundant hasRole calls
+        const roleCache = new Map<string, number>();
+        const getRole = async (addr: string): Promise<number> => {
+          const cached = roleCache.get(addr);
+          if (cached !== undefined) return cached;
+          const role = await identifyRole(vault, addr);
+          roleCache.set(addr, role);
+          return role;
+        };
+
         const out: MessageType[] = [];
-        for (let i = start; i < count; i++) {
-          const m = await bus.getMessage(i);
-          out.push(mapMessage(m, i));
+        let id = 0;
+
+        for (const log of proposals as any[]) {
+          const proposalId = Number(log.args?.proposalId ?? 0);
+          const proposer = log.args?.proposer ?? '';
+          const role = await getRole(proposer);
+          const block = log.blockNumber;
+          const ts = (await p.getBlock(block).catch(() => null))?.timestamp ?? 0;
+          out.push({
+            messageId: id++, proposalId, agentRole: role || 1, messageType: 0,
+            blockNumber: block, dataHash: `${proposalId} → ${(log.args?.target ?? '').slice(0, 10)}…`,
+            timestamp: ts ? ts * 1000 : Date.now(),
+            agentName: role === 1 ? 'Yield Scout' : 'Agent',
+            actionType: 'PROPOSAL',
+          });
         }
+
+        for (const log of riskApprovals as any[]) {
+          const proposalId = Number(log.args?.proposalId ?? 0);
+          const block = log.blockNumber;
+          const ts = (await p.getBlock(block).catch(() => null))?.timestamp ?? 0;
+          out.push({
+            messageId: id++, proposalId, agentRole: 2, messageType: 1,
+            blockNumber: block, dataHash: `#${proposalId} approved`,
+            timestamp: ts ? ts * 1000 : Date.now(),
+            agentName: 'Risk Guard', actionType: 'APPROVAL',
+          });
+        }
+
+        for (const log of scoutApprovals as any[]) {
+          const proposalId = Number(log.args?.proposalId ?? 0);
+          const block = log.blockNumber;
+          const ts = (await p.getBlock(block).catch(() => null))?.timestamp ?? 0;
+          out.push({
+            messageId: id++, proposalId, agentRole: 1, messageType: 1,
+            blockNumber: block, dataHash: `#${proposalId} approved`,
+            timestamp: ts ? ts * 1000 : Date.now(),
+            agentName: 'Yield Scout', actionType: 'APPROVAL',
+          });
+        }
+
+        for (const log of votes as any[]) {
+          const proposalId = Number(log.args?.proposalId ?? 0);
+          const voter = log.args?.voter ?? '';
+          const support = log.args?.support;
+          const role = await getRole(voter);
+          const block = log.blockNumber;
+          const ts = (await p.getBlock(block).catch(() => null))?.timestamp ?? 0;
+          const actionType = support ? 'APPROVAL' : 'VETO';
+          const msgType = support ? 1 : 2;
+          const roleNames: Record<number, string> = { 1: 'Yield Scout', 2: 'Risk Guard', 3: 'Executor', 4: 'Governor' };
+          out.push({
+            messageId: id++, proposalId, agentRole: role || 4, messageType: msgType,
+            blockNumber: block, dataHash: `#${proposalId} ${support ? 'voted YES' : 'voted NO'}`,
+            timestamp: ts ? ts * 1000 : Date.now(),
+            agentName: roleNames[role] || 'Agent',
+            actionType,
+          });
+        }
+
+        for (const log of executed as any[]) {
+          const proposalId = Number(log.args?.proposalId ?? 0);
+          const block = log.blockNumber;
+          const ts = (await p.getBlock(block).catch(() => null))?.timestamp ?? 0;
+          out.push({
+            messageId: id++, proposalId, agentRole: 3, messageType: 3,
+            blockNumber: block, dataHash: `#${proposalId} executed ✓`,
+            timestamp: ts ? ts * 1000 : Date.now(),
+            agentName: 'Executor', actionType: 'EXECUTED',
+          });
+        }
+
+        for (const log of cancelled as any[]) {
+          const proposalId = Number(log.args?.proposalId ?? 0);
+          const block = log.blockNumber;
+          const ts = (await p.getBlock(block).catch(() => null))?.timestamp ?? 0;
+          out.push({
+            messageId: id++, proposalId, agentRole: 2, messageType: 2,
+            blockNumber: block, dataHash: `#${proposalId} vetoed ✗`,
+            timestamp: ts ? ts * 1000 : Date.now(),
+            agentName: 'Risk Guard', actionType: 'VETO',
+          });
+        }
+
         if (stopped) return;
-        setMessages(out.reverse());
-        setDemo(false);
+
+        if (out.length === 0) {
+          // No on-chain activity yet — show demo feed so the panel isn't blank
+          setDemo(true);
+          setMessages(MOCK_MESSAGES);
+        } else {
+          out.sort((a, b) => b.blockNumber - a.blockNumber);
+          setMessages(out.slice(0, 30));
+          setDemo(false);
+        }
         setIsLoading(false);
       } catch {
         if (stopped) return;
@@ -211,12 +321,10 @@ export const useAgentMessages = () => {
         setIsLoading(false);
       }
     };
+
     load();
     const iv = setInterval(load, 5000);
-    return () => {
-      stopped = true;
-      clearInterval(iv);
-    };
+    return () => { stopped = true; clearInterval(iv); };
   }, []);
 
   // Per-agent action counts (role 1..4) derived from the live feed

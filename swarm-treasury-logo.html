@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swarm Treasury — Logo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg: #06080d;
+    --cyan: #39d2c0;
+    --blue: #58a6ff;
+    --text: #e6edf3;
+    --muted: #6e7681;
+    --border: #21262d;
+    --display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    min-height: 100vh;
+    background: var(--bg);
+    font-family: var(--body);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 60px 20px;
+  }
+
+  .logo-card {
+    background: linear-gradient(145deg, #0d1117 0%, #161b22 100%);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 48px 60px;
+    margin: 20px 0;
+    max-width: 600px;
+    width: 100%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+
+  .logo-card h3 {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+
+  .logo-preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  /* Horizontal wordmark */
+  .wordmark-h {
+    font-family: var(--display);
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 1.1;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .wordmark-h .protocol { color: var(--cyan); }
+
+  /* Vertical wordmark */
+  .wordmark-v {
+    font-family: var(--display);
+    font-size: 42px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    line-height: 1.15;
+    color: var(--text);
+    text-align: center;
+  }
+  .wordmark-v .protocol { color: var(--cyan); }
+  .wordmark-v .sep { display: block; color: var(--cyan); }
+
+  /* Icon only */
+  .icon-only {
+    width: 96px;
+    height: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .icon-only svg { width: 100%; height: 100%; }
+
+  /* Icon + horizontal label */
+  .icon-label {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .icon-label .icon { width: 40px; height: 40px; flex-shrink: 0; }
+  .icon-label .text {
+    font-family: var(--display);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.5px;
+  }
+  .icon-label .text .protocol { color: var(--cyan); }
+
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 24px 0;
+    width: 100%;
+  }
+
+  .dl-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 28px;
+    font-family: var(--display);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--bg);
+    background: var(--cyan);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    margin-top: 24px;
+    box-shadow: 0 8px 32px rgba(57,210,192,0.35);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .dl-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(57,210,192,0.5); }
+  .dl-btn:active { transform: translateY(0); }
+  .dl-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 16px; }
+
+  @media print {
+    .dl-btn, .btn-row { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 1. Horizontal Wordmark -->
+<div class="logo-card">
+  <h3>Horizontal Wordmark — primary</h3>
+  <div class="logo-preview" id="logo-h">
+    <div class="wordmark-h">SWARM<span class="protocol">://</span>TREASURY</div>
+  </div>
+  <div class="btn-row">
+    <button class="dl-btn" data-target="logo-h" data-name="swarm-treasury-logo-horizontal.png">Download PNG</button>
+  </div>
+</div>
+
+<!-- 2. Vertical Wordmark -->
+<div class="logo-card">
+  <h3>Vertical Wordmark — social/profile</h3>
+  <div class="logo-preview" id="logo-v">
+    <div class="wordmark-v">
+      SWARM<span class="sep">://</span><span class="protocol">TREASURY</span>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="dl-btn" data-target="logo-v" data-name="swarm-treasury-logo-vertical.png">Download PNG</button>
+  </div>
+</div>
+
+<!-- 3. Icon Only -->
+<div class="logo-card">
+  <h3>Icon Only — favicon / app icon</h3>
+  <div class="logo-preview" id="logo-icon">
+    <div class="icon-only">
+      <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="iconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#39d2c0"/>
+            <stop offset="100%" stop-color="#58a6ff"/>
+          </linearGradient>
+        </defs>
+        <!-- Hexagon background -->
+        <path d="M48 4 L88 22 L88 74 L48 92 L8 74 L8 22 Z" fill="url(#iconGrad)" opacity="0.15"/>
+        <path d="M48 4 L88 22 L88 74 L48 92 L8 74 L8 22 Z" stroke="url(#iconGrad)" stroke-width="2.5"/>
+        <!-- Swarm arrow -->
+        <g stroke="url(#iconGrad)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M28 56 L48 36 L68 56"/>
+          <path d="M28 42 L48 22 L68 42"/>
+          <path d="M28 70 L48 50 L68 70"/>
+        </g>
+        <!-- Center dot -->
+        <circle cx="48" cy="48" r="4" fill="url(#iconGrad)"/>
+      </svg>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="dl-btn" data-target="logo-icon" data-name="swarm-treasury-icon.png">Download PNG</button>
+  </div>
+</div>
+
+<!-- 4. Icon + Label (compact horizontal) -->
+<div class="logo-card">
+  <h3>Icon + Label — compact header</h3>
+  <div class="logo-preview" id="logo-il">
+    <div class="icon-label">
+      <div class="icon">
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="iconGradSm" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#39d2c0"/>
+              <stop offset="100%" stop-color="#58a6ff"/>
+            </linearGradient>
+          </defs>
+          <path d="M8 4 L32 12 L32 28 L8 36 L0 28 L0 12 Z" fill="url(#iconGradSm)" opacity="0.15"/>
+          <path d="M8 4 L32 12 L32 28 L8 36 L0 28 L0 12 Z" stroke="url(#iconGradSm)" stroke-width="1.5"/>
+          <g stroke="url(#iconGradSm)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 26 L20 16 L26 26"/>
+            <path d="M14 18 L20 8 L26 18"/>
+            <path d="M14 34 L20 24 L26 34"/>
+          </g>
+          <circle cx="20" cy="20" r="2" fill="url(#iconGradSm)"/>
+        </svg>
+      </div>
+      <span class="text">SWARM<span class="protocol">://</span>TREASURY</span>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="dl-btn" data-target="logo-il" data-name="swarm-treasury-icon-label.png">Download PNG</button>
+  </div>
+</div>
+
+<!-- 5. Dark mode on light preview (for checking contrast) -->
+<div class="logo-card">
+  <h3>Contrast check — on light bg</h3>
+  <div class="logo-preview" id="logo-light" style="background: #ffffff; border-radius: 12px; padding: 32px;">
+    <div class="wordmark-h" style="color: #06080d;">SWARM<span class="protocol" style="color: #39d2c0;">://</span>TREASURY</div>
+  </div>
+  <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:12px;">Verify legibility on light backgrounds</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script>
+  // Download handler for each logo
+  document.querySelectorAll('.dl-btn').forEach(btn => {
+    btn.onclick = async () => {
+      const targetId = btn.dataset.target;
+      const fileName = btn.dataset.name;
+      const el = document.getElementById(targetId);
+      if (!el) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Rendering…';
+
+      try {
+        // For text-only logos, add a temporary container with transparent bg
+        const canvas = await html2canvas(el, {
+          scale: 4, // high-res
+          useCORS: true,
+          logging: false,
+          backgroundColor: null // transparent
+        });
+
+        // Trim transparent whitespace
+        const trimmed = trimCanvas(canvas);
+
+        trimmed.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          a.click();
+          URL.revokeObjectURL(url);
+          btn.textContent = 'Downloaded ✓';
+          setTimeout(() => { btn.textContent = 'Download PNG'; btn.disabled = false; }, 1500);
+        }, 'image/png');
+      } catch (e) {
+        console.error(e);
+        btn.textContent = 'Error — right-click → Save Image';
+        btn.disabled = false;
+      }
+    };
+  });
+
+  // Trim transparent pixels from canvas edges
+  function trimCanvas(canvas) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    const data = ctx.getImageData(0, 0, w, h).data;
+
+    let top = 0, bottom = h, left = w, right = 0;
+    let found = false;
+
+    // Scan top
+    for (let y = 0; y < h && !found; y++) {
+      for (let x = 0; x < w; x++) {
+        if (data[(y * w + x) * 4 + 3] > 0) { top = y; found = true; break; }
+      }
+    }
+    // Scan bottom
+    found = false;
+    for (let y = h - 1; y >= 0 && !found; y--) {
+      for (let x = 0; x < w; x++) {
+        if (data[(y * w + x) * 4 + 3] > 0) { bottom = y; found = true; break; }
+      }
+    }
+    // Scan left
+    found = false;
+    for (let x = 0; x < w && !found; x++) {
+      for (let y = 0; y < h; y++) {
+        if (data[(y * w + x) * 4 + 3] > 0) { left = x; found = true; break; }
+      }
+    }
+    // Scan right
+    found = false;
+    for (let x = w - 1; x >= 0 && !found; x--) {
+      for (let y = 0; y < h; y++) {
+        if (data[(y * w + x) * 4 + 3] > 0) { right = x; found = true; break; }
+      }
+    }
+
+    const pad = 20; // breathing room
+    const tw = Math.max(1, right - left + 1 + pad * 2);
+    const th = Math.max(1, bottom - top + 1 + pad * 2);
+    const out = document.createElement('canvas');
+    out.width = tw;
+    out.height = th;
+    const octx = out.getContext('2d');
+    octx.drawImage(canvas, Math.max(0, left - pad), Math.max(0, top - pad), tw, th, 0, 0, tw, th);
+    return out;
+  }
+</script>
+</body>
+</html>

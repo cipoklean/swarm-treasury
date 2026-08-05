@@ -27,8 +27,8 @@ export interface Activity {
 
 const ERC20_ABI = ['function decimals() view returns (uint8)'];
 
-// How far back to scan for events (BotChain ~0.75s blocks → 4000 ≈ 50 min).
-const LOOKBACK_BLOCKS = 4000;
+// How far back to scan for events (BotChain ~0.75s blocks → 8000 ≈ 100 min).
+const LOOKBACK_BLOCKS = 8000;
 const MAX_ROWS = 20;
 
 interface EventSpec {
@@ -42,6 +42,7 @@ interface EventSpec {
 const SPECS: EventSpec[] = [
   { event: 'ProposalCreated',   type: 'Proposal Created',   category: 'neutral', amountField: 'value',  partyField: 'target' },
   { event: 'ProposalExecuted',  type: 'Proposal Executed',  category: 'neutral' },
+  { event: 'ProposalCancelled', type: 'Proposal Vetoed',    category: 'neutral' },
   { event: 'TreasuryDeposit',   type: 'Treasury Deposit',   category: 'in',      amountField: 'amount', partyField: 'from' },
   { event: 'TreasuryWithdrawal',type: 'Treasury Withdrawal',category: 'out',     amountField: 'amount', partyField: 'to' },
   { event: 'StrategyDeposited', type: 'Deployed to Strategy',category: 'out',    amountField: 'amount', partyField: 'strategy' },
@@ -49,6 +50,7 @@ const SPECS: EventSpec[] = [
   { event: 'StrategyHarvested', type: 'Yield Harvested',    category: 'in',      amountField: 'amount', partyField: 'strategy' },
   { event: 'EmergencyWithdrawal',type:'Emergency Withdrawal',category:'out',     amountField: 'amount', partyField: 'to' },
   { event: 'EmergencyPause',    type: 'Emergency Pause',    category: 'neutral', partyField: 'guardian' },
+  { event: 'EmergencyUnpause',  type: 'Emergency Unpause',  category: 'neutral', partyField: 'guardian' },
 ];
 
 export const useTreasuryActivity = () => {
