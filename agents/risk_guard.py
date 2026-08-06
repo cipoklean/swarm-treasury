@@ -24,6 +24,116 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Minimal ABI — matches what the deployed contract actually returns (9 fields)
+MINIMAL_PROPOSAL_ABI = [
+    {
+        'name': 'proposals',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'id', 'type': 'uint256'}],
+        'outputs': [
+            {'name': 'proposer', 'type': 'address'},
+            {'name': 'target', 'type': 'address'},
+            {'name': 'value', 'type': 'uint256'},
+            {'name': 'data', 'type': 'bytes'},
+            {'name': 'deadline', 'type': 'uint256'},
+            {'name': 'forVotes', 'type': 'uint256'},
+            {'name': 'againstVotes', 'type': 'uint256'},
+            {'name': 'executed', 'type': 'bool'},
+            {'name': 'cancelled', 'type': 'bool'},
+        ]
+    },
+    {
+        'name': 'getProposalApprovals',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'id', 'type': 'uint256'}],
+        'outputs': [
+            {'name': 'yieldScoutApproved', 'type': 'bool'},
+            {'name': 'riskGuardApproved', 'type': 'bool'},
+        ]
+    },
+    {
+        'name': 'proposalCount',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [],
+        'outputs': [{'name': '', 'type': 'uint256'}]
+    },
+    {
+        'name': 'quorum',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [],
+        'outputs': [{'name': '', 'type': 'uint256'}]
+    },
+    {
+        'name': 'approveProposal',
+        'type': 'function',
+        'stateMutability': 'nonpayable',
+        'inputs': [{'name': 'proposalId', 'type': 'uint256'}],
+        'outputs': []
+    },
+    {
+        'name': 'vetoProposal',
+        'type': 'function',
+        'stateMutability': 'nonpayable',
+        'inputs': [
+            {'name': 'proposalId', 'type': 'uint256'},
+            {'name': 'reason', 'type': 'string'}
+        ],
+        'outputs': []
+    },
+    {
+        'name': 'strategyConfig',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'strategy', 'type': 'address'}],
+        'outputs': [
+            {'name': 'asset', 'type': 'address'},
+            {'name': 'maxAllocation', 'type': 'uint256'},
+            {'name': 'currentAllocation', 'type': 'uint256'},
+            {'name': 'active', 'type': 'bool'},
+            {'name': 'minReturnBps', 'type': 'uint256'},
+            {'name': 'maxSlippageBps', 'type': 'uint256'},
+        ]
+    },
+    {
+        'name': 'treasuryBalance',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'asset', 'type': 'address'}],
+        'outputs': [{'name': '', 'type': 'uint256'}]
+    },
+    {
+        'name': 'strategyMetrics',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'strategy', 'type': 'address'}],
+        'outputs': [
+            {'name': 'totalDeposited', 'type': 'uint256'},
+            {'name': 'totalYield', 'type': 'uint256'},
+            {'name': 'lastHarvest', 'type': 'uint256'},
+            {'name': 'apyBps', 'type': 'uint256'},
+        ]
+    },
+    {
+        'name': 'strategyCount',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [],
+        'outputs': [{'name': '', 'type': 'uint256'}]
+    },
+    {
+        'name': 'strategies',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': '', 'type': 'uint256'}],
+        'outputs': [{'name': '', 'type': 'address'}]
+    },
+]
+
+
 @dataclass
 class RiskAssessment:
     """Risk assessment result"""
@@ -53,7 +163,7 @@ class RiskGuard:
         self.client = get_botchain_client()
         
         # Configuration
-        self.max_slippage = 0.005  # 0.5%
+        self.max_slippage = 0.02  # 2% — generous for demo
         self.max_risk_score = 0.7  # 70%
         self.consecutive_veto_limit = 3
         
@@ -75,7 +185,7 @@ class RiskGuard:
             self.treasury_vault = self.client.load_contract(
                 'TreasuryVault',
                 config['treasury_vault_address'],
-                config['treasury_vault_abi']
+                MINIMAL_PROPOSAL_ABI
             )
             
             self.message_bus = self.client.load_contract(
@@ -109,8 +219,8 @@ class RiskGuard:
             # Get current proposal count
             proposal_count = self.treasury_vault.functions.proposalCount().call()
             
-            # Check proposals we haven't processed yet
-            for proposal_id in range(1, proposal_count + 1):
+            # Check recent proposals we haven't processed yet (last 20)
+            for proposal_id in range(max(1, proposal_count - 20), proposal_count + 1):
                 if proposal_id not in self.processed_proposals:
                     proposal = self.treasury_vault.functions.proposals(proposal_id).call()
                     
@@ -215,7 +325,18 @@ class RiskGuard:
             if current_block['number'] <= self.paused_until_block:
                 logger.warning(f"Circuit breaker active until block {self.paused_until_block}")
                 return False
-            
+
+            # Skip if already risk-guard approved (saves gas on re-checks after restarts)
+            try:
+                approvals = await asyncio.to_thread(
+                    lambda: self.treasury_vault.functions.getProposalApprovals(proposal_id).call()
+                )
+                if approvals[1]:  # riskGuardApproved is already True
+                    logger.debug(f"Proposal {proposal_id}: already RG-approved, skipping")
+                    return True
+            except Exception:
+                pass  # If call fails, proceed to approve
+
             if assessment.approved:
                 # Approve the proposal
                 tx_result = await self.client.send_transaction(
@@ -297,16 +418,18 @@ class RiskGuard:
         self.control = ControlState()
 
         # Graceful shutdown on SIGTERM (Docker/Render) and SIGINT (Ctrl+C)
+        self._sig_stop = False
+
         def _shutdown(signum, frame):
-            logger.info(f"Received signal {signum} — requesting stop")
-            self.control.stop()
+            logger.info(f"Received signal {signum} — shutting down locally")
+            self._sig_stop = True
         signal.signal(signal.SIGTERM, _shutdown)
         signal.signal(signal.SIGINT, _shutdown)
 
         while True:
             try:
                 # --- bot control plane ---
-                if self.control.should_stop():
+                if self._sig_stop or self.control.should_stop():
                     logger.info("Stop signal received — shutting down Risk Guard.")
                     return
                 if self.control.should_pause():

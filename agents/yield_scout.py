@@ -66,9 +66,9 @@ class YieldScout:
         self.client = get_botchain_client()
         
         # Configuration
-        self.poll_interval = 30  # blocks (~22s — gives executor time to settle)
+        self.poll_interval = 120  # blocks (~90s — slows proposal creation to conserve gas on testnet)
         self.apy_threshold = 1000  # 10% in basis points
-        self.min_investment = 10_000 * 10**18  # 10k tokens minimum
+        self.min_investment = 5_000 * 10**18  # 5k tokens — stays well under 20% single-move cap
         
         # State
         self.last_poll_block = 0
@@ -288,16 +288,18 @@ class YieldScout:
         self.control = ControlState()
 
         # Graceful shutdown on SIGTERM (Docker/Render) and SIGINT (Ctrl+C)
+        self._sig_stop = False
+
         def _shutdown(signum, frame):
-            logger.info(f"Received signal {signum} — requesting stop")
-            self.control.stop()
+            logger.info(f"Received signal {signum} — shutting down locally")
+            self._sig_stop = True
         signal.signal(signal.SIGTERM, _shutdown)
         signal.signal(signal.SIGINT, _shutdown)
 
         while True:
             try:
                 # --- bot control plane ---
-                if self.control.should_stop():
+                if self._sig_stop or self.control.should_stop():
                     logger.info("Stop signal received — shutting down Yield Scout.")
                     return
                 if self.control.should_pause():

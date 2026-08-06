@@ -7,8 +7,8 @@ NOTE: The deployed TreasuryVault's proposals() getter returns 9 fields:
   [0] proposer, [1] target, [2] value, [3] data, [4] deadline,
   [5] forVotes, [6] againstVotes, [7] executed, [8] cancelled
 
-  Approval fields (yieldScoutApproved, riskGuardApproved, approvedAtBlock)
-  are NOT in the getter return data. We track approvals via events instead.
+  Approval fields (yieldScoutApproved, riskGuardApproved) are in a separate
+  getProposalApprovals() function returning [yieldScoutApproved, riskGuardApproved].
 """
 
 import asyncio
@@ -46,6 +46,16 @@ MINIMAL_PROPOSAL_ABI = [
             {'name': 'againstVotes', 'type': 'uint256'},
             {'name': 'executed', 'type': 'bool'},
             {'name': 'cancelled', 'type': 'bool'},
+        ]
+    },
+    {
+        'name': 'getProposalApprovals',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'id', 'type': 'uint256'}],
+        'outputs': [
+            {'name': 'yieldScoutApproved', 'type': 'bool'},
+            {'name': 'riskGuardApproved', 'type': 'bool'},
         ]
     },
     {
@@ -137,12 +147,10 @@ class Executor:
         self.agent_registry = None
         self.completed_proposals: Set[int] = set()  # permanently done
         self.retry_count: Dict[int, int] = {}
-        self.max_retries = 3
-        # Event-based tracking
-        self.rg_approved: Set[int] = set()  # Risk Guard approved proposals
-        self.ys_approved: Set[int] = set()  # Yield Scout approved proposals (auto at creation)
+        self.max_retries = 10
         self.voted_proposals: Set[int] = set()  # Proposals we voted on
-        self.last_event_block: int = 0  # scan progress
+        self.approval_blocks: Dict[int, int] = {}  # proposal_id -> block when executor first saw both approvals
+        self.failed_proposals: Dict[int, int] = {}  # proposal_id -> block of last execution failure (for backoff)
 
     async def initialize_contracts(self, config: Dict[str, Any]) -> None:
         # Use full ABI for message_bus and agent_registry
@@ -155,103 +163,11 @@ class Executor:
             config['treasury_vault_address'],
             MINIMAL_PROPOSAL_ABI
         )
-        logger.info("Contracts initialized (using minimal proposals ABI)")
-
-    def _get_raw_logs(self, topic0: str, from_block: int, to_block: int) -> list:
-        """Get raw event logs using eth_getLogs RPC directly.
-        Bypasses web3.py event API which doesn't work with this testnet node."""
-        filter_obj = {
-            'fromBlock': hex(from_block),
-            'toBlock': hex(to_block),
-            'address': self.treasury_vault.address,
-            'topics': [topic0],
-        }
-        return self.client.w3.eth.get_logs(filter_obj)
-
-    # Hardcoded event topic hashes (keccak256 of event signatures)
-    RG_TOPIC = '0xcf5ab974f546a320459b3c9f675829d931ada4f64278729a23fd948155e3f746'
-    YS_TOPIC = '0x141030f00fc23d5dfb667424910f036e988a750aeb44129fcb7b55a7d9da51ad'
-    PC_TOPIC = '0x561f90d9617123cf27df55516c5c710aa97b580a9570f46efe5cc75500f67dc5'
-
-    async def scan_approval_events(self) -> None:
-        """Scan blockchain events to track approval status for all proposals.
-        Uses raw eth_getLogs RPC (not web3.py event API) because
-        the testnet node doesn't support the event filtering methods."""
-        try:
-            current_block = await asyncio.to_thread(
-                lambda: self.client.w3.eth.block_number
-            )
-            if self.last_event_block == 0:
-                # On first run, scan from much further back to catch all historical events
-                self.last_event_block = max(1, current_block - 50000)
-
-            from_block = self.last_event_block + 1
-            to_block = current_block
-
-            if from_block > to_block:
-                return
-
-            rg_count = 0
-            ys_count = 0
-            pc_count = 0
-
-            # Scan RiskGuardApproved events via raw eth_getLogs
-            try:
-                rg_logs = await asyncio.to_thread(
-                    self._get_raw_logs, self.RG_TOPIC, from_block, to_block
-                )
-                for log in rg_logs:
-                    # proposalId is indexed topic[1] — decode from hex
-                    if log.get('topics') and len(log['topics']) >= 2:
-                        pid = int(log['topics'][1].hex(), 16)
-                        self.rg_approved.add(pid)
-                        rg_count += 1
-                if rg_count > 0:
-                    logger.info(f"Scanned {rg_count} RiskGuardApproved events (blocks {from_block}-{to_block})")
-            except Exception as e:
-                logger.warning(f"RiskGuardApproved scan error: {e}")
-
-            # YieldScoutApproved events
-            try:
-                ys_logs = await asyncio.to_thread(
-                    self._get_raw_logs, self.YS_TOPIC, from_block, to_block
-                )
-                for log in ys_logs:
-                    if log.get('topics') and len(log['topics']) >= 2:
-                        pid = int(log['topics'][1].hex(), 16)
-                        self.ys_approved.add(pid)
-                        ys_count += 1
-                if ys_count > 0:
-                    logger.info(f"Scanned {ys_count} YieldScoutApproved events")
-            except Exception as e:
-                logger.warning(f"YieldScoutApproved scan error: {e}")
-
-            # ProposalCreated events (createProposal auto-sets yieldScoutApproved=true)
-            try:
-                pc_logs = await asyncio.to_thread(
-                    self._get_raw_logs, self.PC_TOPIC, from_block, to_block
-                )
-                for log in pc_logs:
-                    if log.get('topics') and len(log['topics']) >= 2:
-                        pid = int(log['topics'][1].hex(), 16)
-                        self.ys_approved.add(pid)
-                        pc_count += 1
-                if pc_count > 0:
-                    logger.info(f"Scanned {pc_count} ProposalCreated events")
-            except Exception as e:
-                logger.warning(f"ProposalCreated scan error: {e}")
-
-            self.last_event_block = to_block
-            if rg_count + ys_count + pc_count > 0:
-                logger.info(f"Approval sets: {len(self.rg_approved)} RG-approved, {len(self.ys_approved)} YS-approved")
-
-        except Exception as e:
-            logger.error(f"Error scanning approval events: {e}")
+        logger.info("Contracts initialized (using 9-field proposals ABI + getProposalApprovals)")
 
     async def get_ready_proposals(self) -> List[Dict]:
         """Find proposals that are ready for execution.
-        Checks proposals that have both RG and YS approval via event tracking,
-        then verifies on-chain status via the 9-field proposals() getter."""
+        Calls proposals() for basic data and getProposalApprovals() for approval status."""
         ready = []
         try:
             proposal_count = await asyncio.to_thread(
@@ -264,16 +180,8 @@ class Executor:
                 lambda: self.treasury_vault.functions.quorum().call()
             )
 
-            # Check ALL proposals that have both approvals (from event tracking)
-            # Also check recent proposals that might just have gotten approved
-            candidates = self.rg_approved | self.ys_approved
-            # Add recent proposals (last 50) in case events were missed
-            candidates.update(range(max(1, proposal_count - 50), proposal_count + 1))
-
-            checked = 0
-            for proposal_id in sorted(candidates):
-                if proposal_id < 1 or proposal_id > proposal_count:
-                    continue
+            # Only check recent proposals (last 15) to stay fast
+            for proposal_id in range(max(1, proposal_count - 15), proposal_count + 1):
                 if proposal_id in self.completed_proposals:
                     continue
                 if self.retry_count.get(proposal_id, 0) >= self.max_retries:
@@ -281,10 +189,10 @@ class Executor:
                     continue
 
                 try:
+                    # Get proposal data (9 fields)
                     p = await asyncio.to_thread(
                         lambda pid=proposal_id: self.treasury_vault.functions.proposals(pid).call()
                     )
-                    # 9-field layout: proposer, target, value, data, deadline, forVotes, againstVotes, executed, cancelled
                     executed = p[7]
                     cancelled = p[8]
                     deadline = p[4]
@@ -293,18 +201,58 @@ class Executor:
                     if executed or cancelled:
                         self.completed_proposals.add(proposal_id)
                         continue
-                    if current_block > deadline:
+                    # On-chain execution window = deadline + EXECUTION_WINDOW blocks.
+                    # Only give up once we're past that, so late-approved proposals
+                    # (which execute well after the voting deadline) are not dropped early.
+                    if current_block > deadline + 300:
                         self.completed_proposals.add(proposal_id)
                         continue
 
-                    # Check approval via events
-                    is_rg_approved = proposal_id in self.rg_approved
-                    is_ys_approved = proposal_id in self.ys_approved  # always true for created proposals
-                    has_quorum = for_votes >= quorum
+                    # Get approval status (separate function)
+                    approvals = await asyncio.to_thread(
+                        lambda pid=proposal_id: self.treasury_vault.functions.getProposalApprovals(pid).call()
+                    )
+                    ys_approved = approvals[0]
+                    rg_approved = approvals[1]
 
-                    if not is_ys_approved or not is_rg_approved:
+                    # Both approvals must be on-chain
+                    if not ys_approved or not rg_approved:
                         continue
-                    if not has_quorum:
+
+                    # Quorum must be met
+                    if for_votes < quorum:
+                        # Vote YES to push toward quorum
+                        if proposal_id not in self.voted_proposals:
+                            try:
+                                await self.client.send_transaction(
+                                    self.treasury_vault, 'vote', [proposal_id, True], self.private_key
+                                )
+                                self.voted_proposals.add(proposal_id)
+                                logger.info(f"Voted YES on proposal {proposal_id} (forVotes={for_votes})")
+                            except Exception as e:
+                                if "Already voted" in str(e):
+                                    self.voted_proposals.add(proposal_id)
+                                logger.debug(f"Vote failed for {proposal_id}: {e}")
+                        continue
+
+                    # 1. Check if we recently failed and need to back off (lightweight, just to avoid spamming)
+                    if proposal_id in self.failed_proposals:
+                        blocks_since_fail = current_block - self.failed_proposals[proposal_id]
+                        if blocks_since_fail < 20:
+                            logger.debug(f"Proposal {proposal_id}: backing off after failure ({20 - blocks_since_fail} blocks remaining)")
+                            continue
+
+                    # Simple checks only - let contract enforce 100-block delay via simulation
+                    if proposal_id not in self.approval_blocks:
+                        # First time seeing this with both approvals - just track it
+                        self.approval_blocks[proposal_id] = current_block
+
+                    # Basic deadline check — keep a small buffer before the on-chain
+                    # execution window closes (deadline + 300) so we don't try to fire
+                    # a tx that will revert as "execution window passed".
+                    if current_block > deadline + 280:
+                        logger.debug(f"Proposal {proposal_id}: execution window closing ({deadline + 300 - current_block} blocks left)")
+                        self.completed_proposals.add(proposal_id)
                         continue
 
                     ready.append({
@@ -315,8 +263,7 @@ class Executor:
                         'deadline': deadline,
                         'for_votes': for_votes,
                     })
-                    logger.info(f"Proposal {proposal_id} READY: forVotes={for_votes}, RG approved, YS approved")
-                    checked += 1
+                    logger.info(f"Proposal {proposal_id} READY: forVotes={for_votes}, RG={rg_approved}, YS={ys_approved}")
 
                 except Exception as e:
                     logger.debug(f"Proposal {proposal_id} check error: {e}")
@@ -327,13 +274,33 @@ class Executor:
 
     async def execute_proposal(self, proposal_id: int) -> bool:
         try:
-            # Vote YES first to ensure quorum
+            # Simulate first to avoid wasting gas on known failures
             try:
-                await self.client.send_transaction(self.treasury_vault, 'vote', [proposal_id, True], self.private_key)
-            except Exception as e:
-                logger.debug(f"Vote skipped for {proposal_id}: {e}")
+                sim = await asyncio.to_thread(
+                    lambda: self.treasury_vault.functions.executeProposal(proposal_id).call(
+                        {'from': self.agent_address}
+                    )
+                )
+            except Exception as sim_e:
+                err_str = str(sim_e)
+                if "Execution delay not elapsed" in err_str:
+                    logger.debug(f"Proposal {proposal_id}: execution delay not yet elapsed — skipping tx")
+                    return None  # retry next loop
+                elif "Quorum not met" in err_str:
+                    logger.debug(f"Proposal {proposal_id}: quorum not met yet")
+                    return None
+                elif "Proposal expired" in err_str:
+                    logger.warning(f"Proposal {proposal_id} expired — marking as completed")
+                    self.completed_proposals.add(proposal_id)
+                    return False
+                elif "not approved" in err_str:
+                    logger.warning(f"Proposal {proposal_id}: missing approval — {err_str[:80]}")
+                    return False
+                else:
+                    logger.debug(f"Proposal {proposal_id}: simulation failed: {err_str[:120]}")
 
-            # Execute
+            # If simulation raised an exception, we already returned above
+            # If we reach here, simulation succeeded - execute the real transaction
             tx_result = await self.client.send_transaction(
                 self.treasury_vault, 'executeProposal', [proposal_id], self.private_key
             )
@@ -356,21 +323,27 @@ class Executor:
                 return True
             else:
                 logger.error(f"❌ Execution reverted for proposal {proposal_id}")
+                # Record failure time for backoff
+                current_block = await asyncio.to_thread(lambda: self.client.w3.eth.block_number)
+                self.failed_proposals[proposal_id] = current_block
                 return False
         except Exception as e:
             err_str = str(e)
             if "Proposal expired" in err_str:
-                logger.warning(f"Proposal {proposal_id} expired before execution")
+                logger.warning(f"Proposal {proposal_id} expired — marking as completed")
+                self.completed_proposals.add(proposal_id)
             elif "Yield Scout not approved" in err_str:
                 logger.warning(f"Proposal {proposal_id}: Yield Scout not approved on-chain")
             elif "Risk Guard not approved" in err_str:
                 logger.warning(f"Proposal {proposal_id}: Risk Guard not approved on-chain")
             elif "Execution delay not elapsed" in err_str:
-                logger.info(f"Proposal {proposal_id}: execution delay not yet elapsed")
+                logger.debug(f"Proposal {proposal_id}: execution delay not yet elapsed — will retry")
+                # Don't increment retry count for delay errors
+                return None  # signal: retry without penalty
             elif "Quorum not met" in err_str:
-                logger.info(f"Proposal {proposal_id}: quorum not met yet")
+                logger.debug(f"Proposal {proposal_id}: quorum not met yet")
             else:
-                logger.error(f"Execution failed for proposal {proposal_id}: {e}")
+                logger.error(f"Execution error for proposal {proposal_id}: {e}")
             return False
 
     def _log_transaction(self, tx_hash, proposal_id, block_number, block_hash, gas_used):
@@ -384,18 +357,20 @@ class Executor:
             logger.error(f"Failed to log transaction: {e}")
 
     async def run(self) -> None:
-        logger.info("Executor agent started (minimal ABI mode)")
+        logger.info("Executor agent started (9-field ABI + getProposalApprovals, on-chain approval checks)")
         self.control = ControlState()
 
+        self._sig_stop = False
+
         def _shutdown(signum, frame):
-            logger.info(f"Received signal {signum} — requesting stop")
-            self.control.stop()
+            logger.info(f"Received signal {signum} — shutting down locally")
+            self._sig_stop = True
         signal.signal(signal.SIGTERM, _shutdown)
         signal.signal(signal.SIGINT, _shutdown)
 
         while True:
             try:
-                if self.control.should_stop():
+                if self._sig_stop or self.control.should_stop():
                     logger.info("Stop signal received — shutting down Executor.")
                     return
                 if self.control.should_pause():
@@ -407,23 +382,25 @@ class Executor:
                     lambda: self.client.w3.eth.block_number
                 )
 
-                # 1. Scan approval events to update tracking
-                await self.scan_approval_events()
-
-                # 2. Find proposals ready for execution
+                # Find proposals ready for execution (reads on-chain approvals directly)
                 ready = await self.get_ready_proposals()
 
                 if not ready:
-                    logger.info(f"Loop @{current_block}: no ready proposals (RG={len(self.rg_approved)}, YS={len(self.ys_approved)}, completed={len(self.completed_proposals)})")
+                    logger.info(f"Loop @{current_block}: no ready proposals (completed={len(self.completed_proposals)})")
 
-                # 3. Execute each ready proposal
+                # Execute each ready proposal
                 for proposal in ready:
                     pid = proposal['proposal_id']
-                    success = await self.execute_proposal(pid)
-                    if success:
+                    result = await self.execute_proposal(pid)
+                    if result is True:
                         self.completed_proposals.add(pid)
+                    elif result is None:
+                        pass  # delay not elapsed — retry next loop without penalty
                     else:
                         self.retry_count[pid] = self.retry_count.get(pid, 0) + 1
+                        if self.retry_count[pid] >= self.max_retries:
+                            self.completed_proposals.add(pid)
+                            logger.warning(f"Proposal {pid} exhausted retries — skipping")
 
                 await asyncio.sleep(0.75)
 

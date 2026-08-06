@@ -51,13 +51,14 @@ class NonceManager:
         self._lock = threading.Lock()
 
     def get_nonce(self, address: str) -> int:
-        """Allocate the next nonce for an address, fetching from chain on first use."""
+        """Return the next nonce for an address by always reading the chain's
+        pending count. We deliberately do NOT cache/increment locally: on a
+        fast testnet with retries and dropped/replaced txs, a local counter
+        desyncs from the chain (the agent would send a stale nonce and get
+        'nonce too low'). Re-reading pending nonce on every send is safe
+        because each agent sends sequentially from a single key."""
         with self._lock:
-            if address not in self._nonces:
-                self._nonces[address] = self._w3.eth.get_transaction_count(address, 'pending')
-            nonce = self._nonces[address]
-            self._nonces[address] = nonce + 1
-            return nonce
+            return self._w3.eth.get_transaction_count(address, 'pending')
 
     def reset(self, address: str) -> None:
         """Reset nonce cache for an address (e.g. after a failed tx)."""

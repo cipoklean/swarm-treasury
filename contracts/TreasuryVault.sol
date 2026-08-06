@@ -93,7 +93,8 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
     uint256 public constant MIN_TIMELOCK_BLOCKS = 2;
     uint256 public constant MAX_SLIPPAGE_BPS = 50;
     uint256 public constant LARGE_MOVE_THRESHOLD_BPS = 2000;
-    uint256 public constant EXECUTION_DELAY = 100; // ~75s on BOT Chain (0.75s blocks)
+    uint256 public constant EXECUTION_DELAY = 100; // execution delay after final approval
+    uint256 public constant EXECUTION_WINDOW = 300; // execution allowed until votingEnd + 300 blocks
     uint256 public constant MAX_SINGLE_MOVE_BPS = 2000; // 20% of treasury per action
     uint256 public constant CIRCUIT_BREAKER_THRESHOLD = 3; // consecutive vetoes before auto-pause
 
@@ -156,14 +157,16 @@ contract TreasuryVault is Initializable, OwnableUpgradeable, PausableUpgradeable
         Proposal storage proposal = _proposals[proposalId];
         require(!proposal.executed, "Already executed");
         require(!proposal.cancelled, "Cancelled");
-        require(block.number <= proposal.deadline, "Proposal expired");
         require(proposal.yieldScoutApproved, "Yield Scout not approved");
         require(proposal.riskGuardApproved, "Risk Guard not approved");
+        require(proposal.approvedAtBlock > 0, "Risk Guard approval block not recorded");
         require(proposal.forVotes >= quorum, "Quorum not met");
-        require(
-            proposal.approvedAtBlock > 0 && block.number >= proposal.approvedAtBlock + EXECUTION_DELAY,
-            "Execution delay not elapsed"
-        );
+        // Execution is permitted from (final approval + EXECUTION_DELAY) up to
+        // (votingEnd + EXECUTION_WINDOW). Decoupling the execution window from the
+        // voting period guarantees a proposal is ALWAYS executable once both agents
+        // have approved, regardless of when approval landed within the voting period.
+        require(block.number >= proposal.approvedAtBlock + EXECUTION_DELAY, "Execution delay not elapsed");
+        require(block.number <= proposal.deadline + EXECUTION_WINDOW, "Proposal execution window passed");
 
         proposal.executed = true;
 

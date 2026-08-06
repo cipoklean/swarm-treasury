@@ -5,10 +5,10 @@
     "block_time": 0.75
   },
   "contracts": {
-    "treasury_vault_address": "0x3a7282ffb230742ed31cfeda0ed6cde5a34d1dee",
-    "agent_registry_address": "0xcf8336e6b484365841c3fe745a5d12b9068497bd",
-    "message_bus_address": "0xd00d17a8ad8db5e8aa7b9dd2acf76e93c5a029e8",
-    "governor_address": "0x10e7d33d7a957c09786d587f273acafd13014fe6"
+    "treasury_vault_address": "0x459E75ba6E7d5DC77d2ECBbA5aF41D48619B1AdD",
+    "agent_registry_address": "0xbC7FE5639b177EE428e87c3650D1ecaA91DE47C8",
+    "message_bus_address": "0x38D7F3C9A9DA917F253c3ca64DD922eC5c7ed4c0",
+    "governor_address": "0xC9163e9403078220Bf060BB4b3959C9d28a12E75"
   },
   "abis": {
     "treasury_vault_abi": [
@@ -4202,7 +4202,7 @@
   },
   "tokens": {
     "USDT": "0x9012345678901234567890123456789012345678",
-    "sUSD": "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"
+    "sUSD": "0x3A7A55B6Ba049c1B742f7491254EC980452897Be"
   },
   "settings": {
     "apy_threshold": 1000,

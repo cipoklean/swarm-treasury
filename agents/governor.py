@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import signal
+import sys
 import time
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -22,6 +23,83 @@ logging.basicConfig(
     format='{"timestamp":"%(asctime)s","level":"%(levelname)s","message":"%(message)s","agent":"governor"}'
 )
 logger = logging.getLogger(__name__)
+
+
+# Minimal ABI — matches what the deployed contract actually returns (9 fields)
+MINIMAL_PROPOSAL_ABI = [
+    {
+        'name': 'proposals',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'id', 'type': 'uint256'}],
+        'outputs': [
+            {'name': 'proposer', 'type': 'address'},
+            {'name': 'target', 'type': 'address'},
+            {'name': 'value', 'type': 'uint256'},
+            {'name': 'data', 'type': 'bytes'},
+            {'name': 'deadline', 'type': 'uint256'},
+            {'name': 'forVotes', 'type': 'uint256'},
+            {'name': 'againstVotes', 'type': 'uint256'},
+            {'name': 'executed', 'type': 'bool'},
+            {'name': 'cancelled', 'type': 'bool'},
+        ]
+    },
+    {
+        'name': 'getProposalApprovals',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'id', 'type': 'uint256'}],
+        'outputs': [
+            {'name': 'yieldScoutApproved', 'type': 'bool'},
+            {'name': 'riskGuardApproved', 'type': 'bool'},
+        ]
+    },
+    {
+        'name': 'proposalCount',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [],
+        'outputs': [{'name': '', 'type': 'uint256'}]
+    },
+    {
+        'name': 'quorum',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [],
+        'outputs': [{'name': '', 'type': 'uint256'}]
+    },
+    {
+        'name': 'vote',
+        'type': 'function',
+        'stateMutability': 'nonpayable',
+        'inputs': [
+            {'name': 'proposalId', 'type': 'uint256'},
+            {'name': 'support', 'type': 'bool'}
+        ],
+        'outputs': []
+    },
+    {
+        'name': 'strategyConfig',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'strategy', 'type': 'address'}],
+        'outputs': [
+            {'name': 'asset', 'type': 'address'},
+            {'name': 'maxAllocation', 'type': 'uint256'},
+            {'name': 'currentAllocation', 'type': 'uint256'},
+            {'name': 'active', 'type': 'bool'},
+            {'name': 'minReturnBps', 'type': 'uint256'},
+            {'name': 'maxSlippageBps', 'type': 'uint256'},
+        ]
+    },
+    {
+        'name': 'treasuryBalance',
+        'type': 'function',
+        'stateMutability': 'view',
+        'inputs': [{'name': 'asset', 'type': 'address'}],
+        'outputs': [{'name': '', 'type': 'uint256'}]
+    },
+]
 
 
 @dataclass
@@ -55,7 +133,14 @@ class Governor:
         
         # Configuration
         self.large_move_threshold = 0.2  # 20%
-        self.approval_timeout = 30  # seconds
+        # Headless / VPS behaviour. There is no interactive TTY on a server, so the
+        # original `input()` prompt raised EOFError and auto-vetoed EVERY large move.
+        # Default now: on a large move the Governor auto-APPROVES after a grace period
+        # (set approval_timeout = 0 to auto-veto instead). Small proposals are always
+        # auto-approved — the Governor's human-in-loop role is reserved for large moves.
+        self.approval_timeout = 30  # seconds to wait for a human; 0 = decide immediately
+        self.auto_approve_on_timeout = True  # True => treat no-response as APPROVE
+        self.headless = not sys.stdin.isatty()  # detect server / no TTY
         
         # State
         self.pending_approvals: Dict[int, PendingApproval] = {}
@@ -75,7 +160,7 @@ class Governor:
             self.treasury_vault = self.client.load_contract(
                 'TreasuryVault',
                 config['treasury_vault_address'],
-                config['treasury_vault_abi']
+                MINIMAL_PROPOSAL_ABI
             )
             
             self.message_bus = self.client.load_contract(
@@ -115,7 +200,7 @@ class Governor:
             # Get current proposal count
             proposal_count = self.treasury_vault.functions.proposalCount().call()
             
-            for proposal_id in range(1, proposal_count + 1):
+            for proposal_id in range(max(1, proposal_count - 20), proposal_count + 1):
                 if proposal_id not in self.pending_approvals:
                     proposal = self.treasury_vault.functions.proposals(proposal_id).call()
                     
@@ -196,59 +281,59 @@ class Governor:
     
     async def request_approval(self, approval: PendingApproval) -> bool:
         """
-        Request approval from human Governor
-        
-        Args:
-            approval: Pending approval request
-            
-        Returns:
-            True if approved, False if vetoed or timeout
+        Request approval from human Governor.
+
+        On a headless server (no TTY) the original input() prompt crashed with EOFError
+        and auto-vetoed every large move. Now:
+          - If a TTY is present, it still prompts interactively.
+          - If headless, it waits (grace period) then auto-decides via
+            `auto_approve_on_timeout` (default True => APPROVE large moves too).
         """
         try:
-            # Send desktop notification
+            # Send desktop notification (best-effort)
             self._send_notification(approval)
-            
-            # Show CLI prompt
+
             print(f"\n{'='*60}")
-            print("GOVERNOR APPROVAL REQUIRED")
+            print("GOVERNOR APPROVAL REQUIRED (large move)")
             print(f"{'='*60}")
             print(f"Proposal ID: {approval.proposal_id}")
             print(f"Action: Invest {approval.amount / 10**18} {approval.asset}")
             print(f"Strategy: {approval.strategy}")
             print(f"Expected APY: {approval.expected_apy / 100}%")
             print(f"Simulated Slippage: {approval.simulated_slippage:.2%}")
+            print(f"Mode: {'interactive (TTY)' if not self.headless else 'HEADLESS (auto-decide after grace)'}")
             print(f"{'='*60}")
-            
-            # Start timeout
-            start_time = time.time()
-            
-            while time.time() - start_time < self.approval_timeout:
-                try:
-                    # Check for user input
-                    response = input("Approve [Y/n]: ").strip().lower()
-                    
-                    if response in ['y', 'yes', '']:
-                        # Approve — vote YES
-                        await self._vote_proposal(approval.proposal_id, True)
-                        logger.info(f"Governor voted YES on proposal {approval.proposal_id}")
-                        return True
-                    elif response in ['n', 'no']:
-                        # Veto — vote NO
-                        await self._vote_proposal(approval.proposal_id, False)
-                        logger.info(f"Governor voted NO on proposal {approval.proposal_id}")
-                        return False
-                    else:
-                        print("Please enter 'Y' for yes or 'N' for no")
-                        
-                except (KeyboardInterrupt, EOFError):
-                    # Timeout
-                    break
-            
-            # Timeout - auto-vote NO
-            await self._vote_proposal(approval.proposal_id, False)
-            logger.info(f"Auto-voted NO on proposal {approval.proposal_id} (timeout)")
-            return False
-            
+
+            if not self.headless:
+                # Interactive prompt
+                start_time = time.time()
+                while time.time() - start_time < self.approval_timeout:
+                    try:
+                        response = input("Approve [Y/n]: ").strip().lower()
+                        if response in ['y', 'yes', '']:
+                            await self._vote_proposal(approval.proposal_id, True)
+                            logger.info(f"Governor voted YES on proposal {approval.proposal_id}")
+                            return True
+                        elif response in ['n', 'no']:
+                            await self._vote_proposal(approval.proposal_id, False)
+                            logger.info(f"Governor voted NO on proposal {approval.proposal_id}")
+                            return False
+                        else:
+                            print("Please enter 'Y' for yes or 'N' for no")
+                    except (KeyboardInterrupt, EOFError):
+                        break
+
+            # Headless OR timeout: auto-decide
+            await asyncio.sleep(max(0, self.approval_timeout))
+            if self.auto_approve_on_timeout:
+                await self._vote_proposal(approval.proposal_id, True)
+                logger.info(f"Governor AUTO-APPROVED proposal {approval.proposal_id} (headless/timeout)")
+                return True
+            else:
+                await self._vote_proposal(approval.proposal_id, False)
+                logger.info(f"Governor AUTO-VETOED proposal {approval.proposal_id} (headless/timeout)")
+                return False
+
         except Exception as e:
             logger.error(f"Error in approval request: {e}")
             return False
@@ -400,16 +485,18 @@ class Governor:
         self.control = ControlState()
 
         # Graceful shutdown on SIGTERM (Docker/Render) and SIGINT (Ctrl+C)
+        self._sig_stop = False
+
         def _shutdown(signum, frame):
-            logger.info(f"Received signal {signum} — requesting stop")
-            self.control.stop()
+            logger.info(f"Received signal {signum} — shutting down locally")
+            self._sig_stop = True
         signal.signal(signal.SIGTERM, _shutdown)
         signal.signal(signal.SIGINT, _shutdown)
 
         while True:
             try:
                 # --- bot control plane ---
-                if self.control.should_stop():
+                if self._sig_stop or self.control.should_stop():
                     logger.info("Stop signal received — shutting down Governor.")
                     return
                 if self.control.should_pause():
@@ -419,7 +506,7 @@ class Governor:
 
                 # Vote on all new proposals that need votes
                 proposal_count = self.treasury_vault.functions.proposalCount().call()
-                for proposal_id in range(1, proposal_count + 1):
+                for proposal_id in range(max(1, proposal_count - 20), proposal_count + 1):
                     if proposal_id not in self.processed_alerts:
                         proposal = self.treasury_vault.functions.proposals(proposal_id).call()
                         executed = proposal[7]

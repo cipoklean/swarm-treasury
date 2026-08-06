@@ -33,6 +33,7 @@ contract DeploySwarmTreasury is Script {
         address yieldScoutAddr = vm.addr(yieldScoutPK);
         address riskGuardAddr  = vm.addr(riskGuardPK);
         address executorAddr   = vm.addr(executorPK);
+        address deployerAddr   = vm.addr(deployerPK);
 
         console.log("Deployer:       ", vm.addr(deployerPK));
         console.log("Governor:       ", governorAddr);
@@ -45,9 +46,9 @@ contract DeploySwarmTreasury is Script {
 
         // 1. AgentRegistry — deployer is initial admin, then grant GOVERNOR_ROLE to governor
         registry = new AgentRegistry();
-        registry.initialize(vm.addr(deployerPK));
+        registry.initialize(deployerAddr);
         registry.grantRole(keccak256("GOVERNOR_ROLE"), governorAddr);
-        registry.grantRole(keccak256("GOVERNOR_ROLE"), vm.addr(deployerPK)); // deployer registers agents during deploy (revoke post-deploy for production)
+        registry.grantRole(keccak256("GOVERNOR_ROLE"), deployerAddr); // deployer registers agents during deploy (revoked at end)
         console.log("AgentRegistry:", address(registry));
 
         // 2. MessageBus
@@ -69,7 +70,7 @@ contract DeploySwarmTreasury is Script {
         // 5. Mock token & strategy
         mockToken = new MintableERC20("Swarm USD", "sUSD");
         console.log("MockToken:", address(mockToken));
-        console.log("Token supply (deployer):", mockToken.balanceOf(vm.addr(deployerPK)));
+        console.log("Token supply (deployer):", mockToken.balanceOf(deployerAddr));
 
         mockStrategy = new MockYieldStrategy();
         console.log("MockStrategy:", address(mockStrategy));
@@ -87,6 +88,11 @@ contract DeploySwarmTreasury is Script {
         vault.grantRole(keccak256("GOVERNOR_ROLE"), address(governor));
         vault.grantRole(keccak256("GOVERNOR_ROLE"), governorAddr);
 
+        // Wire the Governor contract so withdraw() consults its largeMoveThreshold.
+        // Without this, TreasuryVault.withdraw falls back to the hardcoded
+        // LARGE_MOVE_THRESHOLD_BPS and the Governor's on-chain threshold is never read.
+        vault.setGovernorContract(address(governor));
+
         // 7. Whitelist token
         vault.addAssetToWhitelist(address(mockToken), 1_000_000 ether, 1000);
 
@@ -98,6 +104,13 @@ contract DeploySwarmTreasury is Script {
         registry.registerAgent(riskGuardAddr, 2);
         registry.registerAgent(executorAddr, 3);
         registry.registerAgent(governorAddr, 4); // governor agent must be registered for approveProposal/postMessage
+
+        // 9. Security hardening for mainnet: the deployer was temporarily granted
+        //    GOVERNOR_ROLE on the vault + registry to perform setup. Revoke it now so
+        //    only the Governor contract + Governor key retain god-mode. Skipping this
+        //    leaves a hot deployer key with full control of the treasury.
+        vault.revokeRole(keccak256("GOVERNOR_ROLE"), deployerAddr);
+        registry.revokeRole(keccak256("GOVERNOR_ROLE"), deployerAddr);
 
         vm.stopBroadcast();
 

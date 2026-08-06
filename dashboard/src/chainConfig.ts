@@ -7,12 +7,12 @@
 export const DEPLOYED_ADDRESSES: Record<number, Record<string, string>> = {
   // BOT Chain Testnet (rialto)
   968: {
-    TreasuryVault:  '0x3a7282ffb230742ed31cfeda0ed6cde5a34d1dee',
-    AgentRegistry:  '0xcf8336e6b484365841c3fe745a5d12b9068497bd',
-    MessageBus:     '0xd00d17a8ad8db5e8aa7b9dd2acf76e93c5a029e8',
-    Governor:       '0x10e7d33d7a957c09786d587f273acafd13014fe6',
-    MockToken:      '0xae7722bc560dc4d625cbf30f154faf3e3fa13852',
-    MockStrategy:   '0x62067aa0d072397eb2c18bcaa273b7b4bd88c7dd',
+    TreasuryVault:  '0x459E75ba6E7d5DC77d2ECBbA5aF41D48619B1AdD',
+    AgentRegistry:  '0xbC7FE5639b177EE428e87c3650D1ecaA91DE47C8',
+    MessageBus:     '0x38D7F3C9A9DA917F253c3ca64DD922eC5c7ed4c0',
+    Governor:       '0xC9163e9403078220Bf060BB4b3959C9d28a12E75',
+    MockToken:      '0x3A7A55B6Ba049c1B742f7491254EC980452897Be',
+    MockStrategy:   '0x6bA34B034690Bd22f4DB95F023D98fd5f5483C40',
   },
   // TODO: BOT Chain Mainnet — update chain ID, RPC, and addresses after mainnet launch
   // 1: {

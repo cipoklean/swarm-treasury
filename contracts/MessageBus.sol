@@ -16,9 +16,16 @@ contract MessageBus is Initializable, OwnableUpgradeable, IMessageBus {
     uint256 public constant MESSAGE_EXPIRY_BLOCKS = 10;
 
     address public agentRegistry;
+    address public treasuryVault;
 
     function setAgentRegistry(address _agentRegistry) external onlyOwner {
         agentRegistry = _agentRegistry;
+    }
+
+    /// @notice Authorize the treasury contract as a postMessage caller so it can
+    ///         announce proposals without being registered as a (human) agent.
+    function setTreasuryVault(address _treasuryVault) external onlyOwner {
+        treasuryVault = _treasuryVault;
     }
 
     function initialize() external initializer {
@@ -35,7 +42,10 @@ contract MessageBus is Initializable, OwnableUpgradeable, IMessageBus {
         require(agentRole >= 1 && agentRole <= 4, "Invalid agent role");
         require(messageType <= 2, "Invalid message type");
         if (agentRegistry != address(0)) {
-            require(IAgentRegistry(agentRegistry).isAgent(msg.sender), "Not a registered agent");
+            require(
+                IAgentRegistry(agentRegistry).isAgent(msg.sender) || msg.sender == treasuryVault,
+                "Not a registered agent"
+            );
         }
 
         messageCount++;

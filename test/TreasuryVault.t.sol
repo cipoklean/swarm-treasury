@@ -207,6 +207,67 @@ contract TreasuryVaultTest is Test {
         assertTrue(executed);
     }
 
+    // ==================== executeProposal: late approval regression ====================
+    // Regression test for the execution-window race. Previously executeProposal required
+    // block.number <= deadline, but the execution delay (100) was measured from the FINAL
+    // approval within the voting window. If Risk Guard approved at or after
+    // deadline - 100, the only valid execution block would have to be BOTH
+    // >= approvedAtBlock+100 AND <= deadline — an impossible range, so the proposal
+    // could never be executed. The fix decouples the execution window from the voting
+    // period (allowed up to deadline + EXECUTION_WINDOW). This test proves a late approval
+    // is still executable.
+    function test_ExecuteProposal_LateRiskGuardApproval() public {
+        // External-target proposal executed by the EXECUTOR role
+        vm.prank(yieldScout);
+        vault.createProposal(address(token), 0, abi.encodeWithSignature("balanceOf(address)", address(vault)), "test");
+
+        // deadline = 1 + votingDelay(1) + votingPeriod(10) = 12
+        // Meet quorum before voting ends (voting starts at deadline - votingPeriod = 2)
+        vm.roll(2);
+        vm.prank(yieldScout);
+        vault.vote(1, true);
+
+        // Risk Guard approves LATE — at block 110, far past the voting deadline (12)
+        vm.roll(110);
+        vm.prank(riskGuard);
+        vault.approveProposal(1);
+
+        // Too early: execution delay (approvedAtBlock 110 + 100 = 210) not elapsed
+        vm.roll(150);
+        vm.prank(executor);
+        vm.expectRevert("Execution delay not elapsed");
+        vault.executeProposal(1);
+
+        // Now executable: 210 >= 110+100 and 210 <= 12 + EXECUTION_WINDOW(300) = 312
+        vm.roll(210);
+        vm.prank(executor);
+        vault.executeProposal(1);
+        (, , , , , , , bool executed, ) = vault.proposals(1);
+        assertTrue(executed);
+    }
+
+    function test_ExecuteProposal_ExecutionWindowExpired() public {
+        // Shows the new hard ceiling: even a fully-approved proposal reverts once it
+        // passes deadline + EXECUTION_WINDOW.
+        vm.prank(yieldScout);
+        vault.createProposal(address(token), 0, abi.encodeWithSignature("balanceOf(address)", address(vault)), "test");
+
+        vm.roll(2);
+        vm.prank(yieldScout);
+        vault.vote(1, true);
+
+        vm.roll(5); // approve early-ish: approvedAtBlock = 5
+        vm.prank(riskGuard);
+        vault.approveProposal(1);
+
+        // deadline = 1 + 1 + votingPeriod(200) = 202; EXECUTION_WINDOW = 300 => ceiling 502.
+        // approvedAtBlock 5 + 100 = 105 (delay elapsed), but 600 > 502 => rejected
+        vm.roll(600);
+        vm.prank(executor);
+        vm.expectRevert("Proposal execution window passed");
+        vault.executeProposal(1);
+    }
+
     function test_ExecuteProposal_RevertNotExecutor() public {
         vm.prank(yieldScout);
         vault.createProposal(address(token), 0, abi.encodeWithSignature("balanceOf(address)", address(vault)), "test");
