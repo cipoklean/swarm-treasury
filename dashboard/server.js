@@ -108,6 +108,17 @@ async function handleControl(req, res) {
 const RPC_PROXY_URL = process.env.BOT_CHAIN_RPC_URL || 'https://rpc.botchain.ai';
 
 function handleRpc(req, res) {
+  // CORS: allow the Vercel frontend to call this cross-origin
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*' });
+    res.end();
+    return;
+  }
+
   if (req.method !== 'POST') {
     return sendJson(res, 405, { error: 'method not allowed' });
   }

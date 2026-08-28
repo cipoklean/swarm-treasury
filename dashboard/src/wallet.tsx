@@ -23,6 +23,7 @@ export const useWallet = () => useContext(Ctx);
 
 const BOT_CHAIN_ID = Number((import.meta as any).env?.VITE_CHAIN_ID) || 968;
 const BOT_CHAIN_HEX = '0x' + BOT_CHAIN_ID.toString(16);
+const EXPECTED_CHAIN_LABEL = BOT_CHAIN_ID === 677 ? 'BOT Chain Mainnet (677)' : 'BOT Chain Testnet (968)';
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
@@ -49,7 +50,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             params: [{ chainId: BOT_CHAIN_HEX }],
           });
         } catch {
-          throw new Error('Please switch your wallet to BOT Chain (id 968)');
+          throw new Error(`Please switch your wallet to ${EXPECTED_CHAIN_LABEL}`);
         }
       }
       await p.send('eth_requestAccounts', []);
@@ -77,7 +78,32 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const eth = (window as any).ethereum;
     if (!eth || !eth.on) return;
     const onAcct = (accs: string[]) => (accs.length ? connect() : disconnect());
-    const onChain = () => connect().catch(() => {});
+    const onChain = async () => {
+      try {
+        const net = await eth.request({ method: 'eth_chainId' });
+        const newChainId = Number(net);
+        setChainId(newChainId);
+        setError(null);
+        // If we landed on the expected chain, try to refresh the provider.
+        // getNetwork() can throw NETWORK_ERROR during the transition — that's
+        // fine, the existing provider is still usable on the new chain.
+        if (newChainId === BOT_CHAIN_ID) {
+          try {
+            const p = new ethers.BrowserProvider(eth);
+            const info = await p.getNetwork();
+            setChainId(Number(info.chainId));
+            setProvider(p);
+            setSigner(await p.getSigner());
+          } catch {
+            // NETWORK_ERROR / transition in-flight — leave existing provider.
+          }
+        } else {
+          setError(`Wrong network — expected ${EXPECTED_CHAIN_LABEL}`);
+        }
+      } catch {
+        /* eth_chainId unavailable — ignore */
+      }
+    };
     eth.on('accountsChanged', onAcct);
     eth.on('chainChanged', onChain);
     return () => {
