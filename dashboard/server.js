@@ -19,6 +19,7 @@ import http from 'node:http';
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import https from 'node:https';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DIST = join(__dirname, 'dist');
@@ -99,6 +100,68 @@ async function handleControl(req, res) {
   sendJson(res, 405, { error: 'method not allowed' });
 }
 
+// --- RPC proxy -----------------------------------------------------------
+// JSON-RPC proxy to rpc.botchain.ai — lets the Vercel frontend call the
+// public RPC through this Render backend (avoids browser CORS issues).
+// Env: BOT_CHAIN_RPC_URL (default: https://rpc.botchain.ai)
+
+const RPC_PROXY_URL = process.env.BOT_CHAIN_RPC_URL || 'https://rpc.botchain.ai';
+
+function handleRpc(req, res) {
+  if (req.method !== 'POST') {
+    return sendJson(res, 405, { error: 'method not allowed' });
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'swarm-treasury-dashboard/1.0',
+  };
+
+  let body = '';
+  req.on('data', (chunk) => (body += chunk));
+  req.on('end', () => {
+    if (!body) {
+      return sendJson(res, 400, { error: 'empty request' });
+    }
+
+    const options = {
+      hostname: new URL(RPC_PROXY_URL).hostname,
+      port: new URL(RPC_PROXY_URL).port || 443,
+      path: new URL(RPC_PROXY_URL).pathname + (new URL(RPC_PROXY_URL).search || ''),
+      method: 'POST',
+      headers,
+      timeout: 15000,
+    };
+
+    const proxyReq = https.request(options, (proxyRes) => {
+      let data = '';
+      proxyRes.on('data', (chunk) => (data += chunk));
+      proxyRes.on('end', () => {
+        res.writeHead(proxyRes.statusCode || 502, { 'Content-Type': 'application/json' });
+        res.end(data);
+      });
+    });
+
+    proxyReq.on('error', (err) => {
+      sendJson(res, 502, { error: 'RPC proxy error', detail: err.message });
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      sendJson(res, 504, { error: 'RPC proxy timeout' });
+    });
+
+    proxyReq.setTimeout(15000);
+
+    try {
+      proxyReq.write(body);
+    } catch {
+      return sendJson(res, 400, { error: 'invalid request' });
+    }
+    proxyReq.end();
+  });
+}
+
 // --- health -----------------------------------------------------------
 function sendHealth(req, res) {
   if (req.method === 'HEAD') {
@@ -167,6 +230,7 @@ const server = http.createServer((req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path === '/health') return sendHealth(req, res);
   if (path === '/control') return handleControl(req, res);
+  if (path === '/rpc') return handleRpc(req, res);
   if (req.method === 'GET' || req.method === 'HEAD') return serveStatic(req, res);
   sendJson(res, 405, { error: 'method not allowed' });
 });
