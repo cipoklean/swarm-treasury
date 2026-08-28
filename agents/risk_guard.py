@@ -463,10 +463,14 @@ class RiskGuard:
 async def main():
     """Main entry point"""
     from config_loader import load_config, load_env, get_contracts_config
+    from keepalive import start_keepalive
 
     load_env()
-    config = load_config()
-    contract_config = get_contracts_config(config)
+    cfg, contracts = load_config()
+    contract_config = get_contracts_config(contracts, cfg["abis"])
+
+    port = int(os.getenv("PORT", "8000"))
+    start_keepalive(port, "risk_guard")
 
     # Get private key from environment
     private_key = os.getenv('RISK_GUARD_PRIVATE_KEY')

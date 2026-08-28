@@ -14,15 +14,15 @@ export const DEPLOYED_ADDRESSES: Record<number, Record<string, string>> = {
     MockToken:      '0x3A7A55B6Ba049c1B742f7491254EC980452897Be',
     MockStrategy:   '0x6bA34B034690Bd22f4DB95F023D98fd5f5483C40',
   },
-  // TODO: BOT Chain Mainnet — update chain ID, RPC, and addresses after mainnet launch
-  // 1: {
-  //   TreasuryVault:  '0x...',
-  //   AgentRegistry:  '0x...',
-  //   MessageBus:     '0x...',
-  //   Governor:       '0x...',
-  //   MockToken:      '0x...',  // replace with real BOT/ERC-20 token
-  //   MockStrategy:   '0x...',  // replace with real yield strategy
-  // },
+  // BOT Chain Mainnet (677) — deployed 2026-08-27
+  677: {
+    TreasuryVault:  '0x3Ad5eE79fe0dFf0D38645eA5Fc1D2EDd6B490A64',
+    AgentRegistry:  '0x38280Bc47E893051dA76ec6e74B04056AA7b7322',
+    MessageBus:     '0x5BAcD085e34410eb3AFDfD2a95eDf8F16Ed8860e',
+    Governor:       '0x5463b572AbF7f20D9934979FC2bfB0Ee0Bd29361',
+    MockToken:      '0x2765F822156A0CfB1F69eaCf3b76aA261184fFC3',
+    MockStrategy:   '0xf1846688a8191127eb4Fc6c70611a40784a9249e',
+  },
 };
 
 export const CHAINS: Record<number, { rpc: string; name: string; explorer: string }> = {
@@ -31,12 +31,11 @@ export const CHAINS: Record<number, { rpc: string; name: string; explorer: strin
     name: 'BOT Chain Testnet',
     explorer: 'https://scan.botchain.ai',
   },
-  // TODO: BOT Chain Mainnet
-  // 1: {
-  //   rpc: 'https://rpc.botchain.ai',
-  //   name: 'BOT Chain Mainnet',
-  //   explorer: 'https://scan.botchain.ai',
-  // },
+  677: {
+    rpc: 'https://rpc.botchain.ai',
+    name: 'BOT Chain Mainnet',
+    explorer: 'https://scan.botchain.ai',
+  },
 };
 
 const envChainId = Number((import.meta as any).env?.VITE_CHAIN_ID) || 968;

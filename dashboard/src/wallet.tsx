@@ -21,8 +21,8 @@ const DEFAULTS: WalletState = {
 const Ctx = createContext<WalletState>(DEFAULTS);
 export const useWallet = () => useContext(Ctx);
 
-const BOT_CHAIN_ID = 968;
-const BOT_CHAIN_HEX = '0x3c8';
+const BOT_CHAIN_ID = Number((import.meta as any).env?.VITE_CHAIN_ID) || 968;
+const BOT_CHAIN_HEX = '0x' + BOT_CHAIN_ID.toString(16);
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 

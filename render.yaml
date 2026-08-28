@@ -12,3 +12,126 @@ services:
         value: "3000"
       - key: NODE_ENV
         value: production
+      - key: VITE_CHAIN_ID
+        value: "677"
+      - key: VITE_RPC_URL
+        value: "https://rpc.botchain.ai"
+      - key: VITE_TREASURY_VAULT
+        value: "0x3Ad5eE79fe0dFf0D38645eA5Fc1D2EDd6B490A64"
+      - key: VITE_AGENT_REGISTRY
+        value: "0x38280Bc47E893051dA76ec6e74B04056AA7b7322"
+      - key: VITE_MESSAGE_BUS
+        value: "0x5BAcD085e34410eb3AFDfD2a95eDf8F16Ed8860e"
+      - key: VITE_GOVERNOR
+        value: "0x5463b572AbF7f20D9934979FC2bfB0Ee0Bd29361"
+      - key: VITE_TOKEN
+        value: "0x2765F822156A0CfB1F69eaCf3b76aA261184fFC3"
+      - key: VITE_STRATEGY
+        value: "0xf1846688a8191127eb4Fc6c70611a40784a9249e"
+      - key: VITE_TOKEN_SYMBOL
+        value: "sUSD"
+      - key: REDIS_URL
+        value: REDIS_URL_HERE  # Upstash TCP URL — control-plane sync with agents (optional)
+
+  # ── Agent Background Workers ──
+  # Each runs one Python agent + a keepalive HTTP server (agents/keepalive.py)
+  # that responds to /health so Render's health checker keeps the service warm.
+  # Render free-tier web services spin down after ~15 min of no traffic;
+  # the keepalive + health checks prevent that, BUT Render free tier does have
+  # a monthly spin-down quota — for 24/7 agent uptime a paid plan or an
+  # always-on host is the real fix. Treat this as a stopgap until the VPS
+  # subscription decision is made.
+  #
+  # IMPORTANT: set each agent's private key + REDIS_URL in the Render dashboard
+  # (→ service → Environment → add variable). The values below are placeholders.
+  # The 4 agents share the SAME Redis key (swarm:control) — dashboard and all
+  # agents stay in sync. Without Redis the file backend won't work cross-service
+  # (agents + dashboard don't share a filesystem on Render), so control buttons
+  # become inert until you add REDIS_URL.
+  - type: web
+    name: yield-scout-agent
+    runtime: python
+    rootDir: .
+    plan: free
+    buildCommand: pip install -r agents/requirements.txt
+    startCommand: python agents/yield_scout.py
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8001"
+      - key: BOT_CHAIN_RPC_URL
+        value: "https://rpc.botchain.ai"
+      - key: BOT_CHAIN_ID
+        value: "677"
+      - key: SWARM_USE_MAINNET
+        value: "1"
+      - key: YIELD_SCOUT_PRIVATE_KEY
+        value: YIELD_SCOUT_PRIVATE_KEY_HERE
+      - key: REDIS_URL
+        value: REDIS_URL_HERE
+
+  - type: web
+    name: risk-guard-agent
+    runtime: python
+    rootDir: .
+    plan: free
+    buildCommand: pip install -r agents/requirements.txt
+    startCommand: python agents/risk_guard.py
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8002"
+      - key: BOT_CHAIN_RPC_URL
+        value: "https://rpc.botchain.ai"
+      - key: BOT_CHAIN_ID
+        value: "677"
+      - key: SWARM_USE_MAINNET
+        value: "1"
+      - key: RISK_GUARD_PRIVATE_KEY
+        value: RISK_GUARD_PRIVATE_KEY_HERE
+      - key: REDIS_URL
+        value: REDIS_URL_HERE
+
+  - type: web
+    name: executor-agent
+    runtime: python
+    rootDir: .
+    plan: free
+    buildCommand: pip install -r agents/requirements.txt
+    startCommand: python agents/executor.py
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8003"
+      - key: BOT_CHAIN_RPC_URL
+        value: "https://rpc.botchain.ai"
+      - key: BOT_CHAIN_ID
+        value: "677"
+      - key: SWARM_USE_MAINNET
+        value: "1"
+      - key: EXECUTOR_PRIVATE_KEY
+        value: EXECUTOR_PRIVATE_KEY_HERE
+      - key: REDIS_URL
+        value: REDIS_URL_HERE
+
+  - type: web
+    name: governor-agent
+    runtime: python
+    rootDir: .
+    plan: free
+    buildCommand: pip install -r agents/requirements.txt
+    startCommand: python agents/governor.py
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8004"
+      - key: BOT_CHAIN_RPC_URL
+        value: "https://rpc.botchain.ai"
+      - key: BOT_CHAIN_ID
+        value: "677"
+      - key: SWARM_USE_MAINNET
+        value: "1"
+      - key: GOVERNOR_PRIVATE_KEY
+        value: GOVERNOR_PRIVATE_KEY_HERE
+      - key: REDIS_URL
+        value: REDIS_URL_HERE

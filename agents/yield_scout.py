@@ -339,10 +339,17 @@ class YieldScout:
 async def main():
     """Main entry point"""
     from config_loader import load_config, load_env, get_contracts_config
+    from keepalive import start_keepalive
 
     load_env()
-    config = load_config()
-    contract_config = get_contracts_config(config)
+    cfg, contracts = load_config()
+    contract_config = get_contracts_config(contracts, cfg["abis"])
+
+    # Keepalive HTTP server for Render health checks (/health -> 200).
+    # On Render the platform sets PORT; locally default 8000.
+    # Daemon thread — non-blocking, agent loop runs in foreground.
+    port = int(os.getenv("PORT", "8000"))
+    start_keepalive(port, "yield_scout")
 
     # Get private key from environment
     private_key = os.getenv('YIELD_SCOUT_PRIVATE_KEY')

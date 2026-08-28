@@ -414,9 +414,15 @@ class Executor:
 
 async def main():
     from config_loader import load_config, load_env, get_contracts_config
+    from keepalive import start_keepalive
+
     load_env()
-    config = load_config()
-    contract_config = get_contracts_config(config)
+    cfg, contracts = load_config()
+    contract_config = get_contracts_config(contracts, cfg["abis"])
+
+    port = int(os.getenv("PORT", "8000"))
+    start_keepalive(port, "executor")
+
     private_key = os.getenv('EXECUTOR_PRIVATE_KEY')
     if not private_key:
         raise ValueError("EXECUTOR_PRIVATE_KEY environment variable not set")

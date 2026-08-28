@@ -10,6 +10,12 @@
     "message_bus_address": "0x38D7F3C9A9DA917F253c3ca64DD922eC5c7ed4c0",
     "governor_address": "0xC9163e9403078220Bf060BB4b3959C9d28a12E75"
   },
+  "contracts_mainnet": {
+    "treasury_vault_address": "0x3Ad5eE79fe0dFf0D38645eA5Fc1D2EDd6B490A64",
+    "agent_registry_address": "0x38280Bc47E893051dA76ec6e74B04056AA7b7322",
+    "message_bus_address": "0x5BAcD085e34410eb3AFDfD2a95eDf8F16Ed8860e",
+    "governor_address": "0x5463b572AbF7f20D9934979FC2bfB0Ee0Bd29361"
+  },
   "abis": {
     "treasury_vault_abi": [
       {

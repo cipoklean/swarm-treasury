@@ -544,13 +544,18 @@ async def main():
     from config_loader import load_config, load_env, get_contracts_config
 
     load_env()
-    config = load_config()
-    contract_config = get_contracts_config(config)
+    cfg, contracts = load_config()
+    contract_config = get_contracts_config(contracts, cfg["abis"])
 
     # Get private key from environment
     private_key = os.getenv('GOVERNOR_PRIVATE_KEY')
     if not private_key:
         raise ValueError("GOVERNOR_PRIVATE_KEY environment variable not set")
+    
+    # Keepalive HTTP server for Render health checks.
+    from keepalive import start_keepalive
+    port = int(os.getenv("PORT", "8000"))
+    start_keepalive(port, "governor")
     
     # Derive address from private key
     w3 = get_botchain_client().w3

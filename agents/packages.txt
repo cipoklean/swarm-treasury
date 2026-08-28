@@ -1,0 +1,13 @@
+# System-level dependencies for Python agent Background Workers.
+# Each line is a Debian/Ubuntu package name installed into the Render
+# build environment before pip install. Keep this minimal — only what
+# pip/web3 cannot provide (native toolchains, system libs).
+#
+# Currently blank: the Python agent stack (web3.py v6, asyncio, json,
+# signal, logging) is pure Python with no C extensions that need system
+# packages on BOT Chain mainnet (EVM-compatible JSON-RPC over HTTP).
+#
+# If you later add plyer (desktop notifications) or a native graph lib
+# the agents don't use, add the matching package here, e.g.:
+#   libgtk-3-0
+#   libnotify4

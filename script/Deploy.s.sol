@@ -14,6 +14,7 @@ import {MintableERC20} from "../contracts/MintableERC20.sol";
 /// @notice Deploys all Swarm Treasury contracts and assigns agent roles
 /// @dev Reads private keys from .env and derives addresses automatically
 contract DeploySwarmTreasury is Script {
+    bytes32 constant DEFAULT_ADMIN_ROLE = 0x00;
     AgentRegistry public registry;
     MessageBus public messageBus;
     TreasuryVault public vault;
@@ -107,10 +108,20 @@ contract DeploySwarmTreasury is Script {
 
         // 9. Security hardening for mainnet: the deployer was temporarily granted
         //    GOVERNOR_ROLE on the vault + registry to perform setup. Revoke it now so
-        //    only the Governor contract + Governor key retain god-mode. Skipping this
-        //    leaves a hot deployer key with full control of the treasury.
+        //    only the Governor contract + Governor key retain god-mode. Skip this and
+        //    the deployer key still holds DEFAULT_ADMIN_ROLE (the AccessControl master
+        //    role, 0x00) on both contracts — a live master key after deployment.
         vault.revokeRole(keccak256("GOVERNOR_ROLE"), deployerAddr);
         registry.revokeRole(keccak256("GOVERNOR_ROLE"), deployerAddr);
+        // C-1: revoke the one-time deployer's DEFAULT_ADMIN_ROLE (bytes32(0), the
+        // AccessControl master role) from both contracts and vest it in the Governor
+        // key, which is already the long-term admin (holds GOVERNOR_ROLE on the vault +
+        // Governor contract). After this the deployer keeps no admin role at all; the
+        // Governor key is the single role admin.
+        vault.grantRole(bytes32(0), governorAddr);
+        vault.revokeRole(bytes32(0), deployerAddr);
+        governor.grantRole(bytes32(0), governorAddr);
+        governor.revokeRole(bytes32(0), deployerAddr);
 
         vm.stopBroadcast();
 
